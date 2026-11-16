@@ -1,0 +1,420 @@
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import * as echarts from 'echarts'
+
+type PriceRow = {
+  date: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+  ma5: number | null
+  ma20: number | null
+  ma60: number | null
+}
+
+type Analysis = {
+  symbol: string
+  name: string
+  is_demo_data: boolean
+  data_source: string
+  latest_data_date: string | null
+  is_realtime: boolean
+  notice: string
+  latest_close: number | null
+  data: PriceRow[]
+}
+type MarketPoint = { time: string; value: number }
+type MarketOverview = {
+  symbol: string
+  name: string
+  is_demo_data: boolean
+  data_source: string
+  latest_data_date: string | null
+  latest_value: number
+  session_open: number
+  session_high: number
+  session_low: number
+  data: MarketPoint[]
+  notice: string
+}
+
+type StockMatch = { stock_id: string; stock_name: string }
+type NewsItem = {
+  id: number
+  stock_id: string
+  title: string
+  source: string
+  published_at: string
+  url: string
+  summary: string
+}
+type NewsPage = { news: NewsItem[]; next_cursor: string | null; has_more: boolean; data_source: string }
+
+const symbol = ref('2330')
+const selectedStockId = ref('')
+const suggestions = ref<StockMatch[]>([])
+const showSuggestions = ref(false)
+const analysis = ref<Analysis | null>(null)
+const viewMode = ref<'market' | 'stock'>('market')
+const market = ref<MarketOverview | null>(null)
+const marketLoading = ref(false)
+const marketError = ref('')
+const loading = ref(false)
+const error = ref('')
+const chartElement = ref<HTMLDivElement | null>(null)
+const newsItems = ref<NewsItem[]>([])
+const newsCursor = ref<string | null>(null)
+const newsHasMore = ref(false)
+const newsLoading = ref(false)
+const newsError = ref('')
+const newsLoadSentinel = ref<HTMLDivElement | null>(null)
+const newsAutoPaused = ref(false)
+const newsSource = ref('')
+let chart: echarts.ECharts | undefined
+let suggestTimer: number | undefined
+let newsObserver: IntersectionObserver | undefined
+
+const latest = computed(() => analysis.value?.data.at(-1))
+
+async function findStocks(query: string): Promise<StockMatch[]> {
+  const response = await fetch(`http://127.0.0.1:8000/api/stocks/search?q=${encodeURIComponent(query)}`)
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.detail ?? `股票搜尋失敗（HTTP ${response.status}）`)
+  return body.results as StockMatch[]
+}
+
+async function loadMarket() {
+  marketLoading.value = true
+  marketError.value = ''
+  try {
+    const response = await fetch('http://127.0.0.1:8000/api/market/taiex')
+    const body = await response.json().catch(() => ({})) as MarketOverview & { detail?: string }
+    if (!response.ok) throw new Error(body.detail ?? `大盤資料載入失敗（HTTP ${response.status}）`)
+    market.value = body
+    await nextTick()
+    if (viewMode.value === 'market') drawMarketChart()
+  } catch (cause) {
+    marketError.value = cause instanceof Error ? cause.message : '無法載入大盤指數，請確認後端已啟動。'
+  } finally {
+    marketLoading.value = false
+  }
+}
+
+function goHome() {
+  chart?.dispose()
+  chart = undefined
+  newsObserver?.disconnect()
+  analysis.value = null
+  viewMode.value = 'market'
+  error.value = ''
+  void loadMarket()
+}
+
+async function loadNewsPage() {
+  const currentSymbol = analysis.value?.symbol
+  if (!currentSymbol || newsLoading.value || !newsHasMore.value && newsCursor.value) return
+
+  newsLoading.value = true
+  newsError.value = ''
+  newsAutoPaused.value = false
+  try {
+    const params = new URLSearchParams({ limit: '10' })
+    if (newsCursor.value) params.set('cursor', newsCursor.value)
+    const response = await fetch(`http://127.0.0.1:8000/api/stocks/${encodeURIComponent(currentSymbol)}/news?${params}`)
+    const body = await response.json().catch(() => ({})) as NewsPage & { detail?: string }
+    if (!response.ok) throw new Error(body.detail ?? `新聞載入失敗（HTTP ${response.status}）`)
+
+    // 以 URL 去重，前端再做一次保護，避免重新查詢或分頁時重複顯示。
+    const existingUrls = new Set(newsItems.value.map((item) => item.url))
+    const newItems = body.news.filter((item) => !existingUrls.has(item.url))
+    newsItems.value = [...newsItems.value, ...newItems]
+    newsCursor.value = body.next_cursor
+    newsHasMore.value = body.has_more
+    newsSource.value = body.data_source
+    // API 可能為了找舊新聞掃描了日期，但該區間沒有新文章；停下自動觸發，讓使用者按鈕決定是否繼續。
+    if (newItems.length === 0 && body.has_more) newsAutoPaused.value = true
+  } catch (cause) {
+    newsError.value = cause instanceof Error ? cause.message : '新聞載入失敗，請稍後重試。'
+    newsAutoPaused.value = true
+  } finally {
+    newsLoading.value = false
+  }
+}
+
+function observeNewsSentinel() {
+  newsObserver?.disconnect()
+  if (!newsLoadSentinel.value || !newsHasMore.value || newsAutoPaused.value) return
+  newsObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) void loadNewsPage()
+  }, { rootMargin: '120px' })
+  newsObserver.observe(newsLoadSentinel.value)
+}
+
+function handleSearchInput() {
+  selectedStockId.value = ''
+  showSuggestions.value = true
+  if (suggestTimer !== undefined) window.clearTimeout(suggestTimer)
+
+  const query = symbol.value.trim()
+  if (!query) {
+    suggestions.value = []
+    showSuggestions.value = false
+    return
+  }
+
+  suggestTimer = window.setTimeout(async () => {
+    try {
+      const matches = await findStocks(query)
+      if (symbol.value.trim() === query) suggestions.value = matches
+    } catch {
+      if (symbol.value.trim() === query) suggestions.value = []
+    }
+  }, 250)
+}
+
+function chooseStock(stock: StockMatch) {
+  symbol.value = stock.stock_name
+  selectedStockId.value = stock.stock_id
+  suggestions.value = []
+  showSuggestions.value = false
+  void searchStock()
+}
+
+async function searchStock() {
+  const query = symbol.value.trim()
+  if (!query) return
+
+  loading.value = true
+  viewMode.value = 'stock'
+  error.value = ''
+  suggestions.value = []
+  showSuggestions.value = false
+  // 查詢時會先移除舊圖表的 v-if 區塊；先釋放 ECharts，避免綁在已移除的 DOM 上。
+  chart?.dispose()
+  chart = undefined
+  analysis.value = null
+  newsItems.value = []
+  newsCursor.value = null
+  newsHasMore.value = false
+  newsError.value = ''
+  newsAutoPaused.value = false
+  newsObserver?.disconnect()
+  try {
+    let requestedSymbol = selectedStockId.value || query
+    if (!selectedStockId.value && !/^\d{4,6}$/.test(query)) {
+      const matches = await findStocks(query)
+      const normalizedQuery = query.toLocaleLowerCase()
+      const exactName = matches.find((stock) => stock.stock_name.toLocaleLowerCase() === normalizedQuery)
+      if (exactName) {
+        requestedSymbol = exactName.stock_id
+      } else if (matches.length === 1) {
+        requestedSymbol = matches[0].stock_id
+      } else if (matches.length > 1) {
+        suggestions.value = matches
+        showSuggestions.value = true
+        throw new Error('找到多檔相符股票，請從下拉清單選擇。')
+      } else {
+        throw new Error(`找不到「${query}」，請確認股票代號或名稱。`)
+      }
+    }
+
+    const response = await fetch(`http://127.0.0.1:8000/api/stocks/${encodeURIComponent(requestedSymbol)}/analysis`)
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new Error(body.detail ?? `查詢失敗（HTTP ${response.status}）`)
+    }
+    selectedStockId.value = requestedSymbol
+    analysis.value = await response.json() as Analysis
+    newsHasMore.value = true
+    void loadNewsPage()
+    await nextTick()
+    drawChart()
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '無法連線到 API，請確認後端已啟動。'
+  } finally {
+    loading.value = false
+  }
+}
+
+watch([newsItems, newsHasMore, newsAutoPaused, newsLoading], async () => {
+  await nextTick()
+  observeNewsSentinel()
+})
+
+function drawChart() {
+  if (!chartElement.value || !analysis.value) return
+  chart ??= echarts.init(chartElement.value)
+  const rows = analysis.value.data
+  chart.setOption({
+    color: ['#246bfe', '#f59e0b', '#8b5cf6', '#16a394'],
+    tooltip: { trigger: 'axis' },
+    legend: { top: 4, right: 8, textStyle: { color: '#667085' } },
+    grid: { left: 52, right: 24, top: 48, bottom: 42 },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: rows.map((row) => row.date),
+      axisLabel: { color: '#8a94a6' },
+      axisLine: { lineStyle: { color: '#e8ebf2' } },
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      axisLabel: { color: '#8a94a6' },
+      splitLine: { lineStyle: { color: '#eef0f5' } },
+    },
+    series: [
+      { name: '收盤價', type: 'line', smooth: true, showSymbol: false, lineStyle: { width: 3 }, data: rows.map((row) => row.close) },
+      { name: 'MA5', type: 'line', smooth: true, showSymbol: false, lineStyle: { width: 1.5 }, data: rows.map((row) => row.ma5) },
+      { name: 'MA20', type: 'line', smooth: true, showSymbol: false, lineStyle: { width: 1.5 }, data: rows.map((row) => row.ma20) },
+      { name: 'MA60', type: 'line', smooth: true, showSymbol: false, lineStyle: { width: 1.5 }, data: rows.map((row) => row.ma60) },
+    ],
+  })
+}
+
+function drawMarketChart() {
+  if (!chartElement.value || !market.value) return
+  chart ??= echarts.init(chartElement.value)
+  chart.setOption({
+    color: ['#2868ee'],
+    tooltip: { trigger: 'axis' },
+    grid: { left: 68, right: 24, top: 24, bottom: 36 },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: market.value.data.map((point) => point.time),
+      axisLabel: { color: '#8a94a6', interval: 29 },
+      axisLine: { lineStyle: { color: '#e8ebf2' } },
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      axisLabel: { color: '#8a94a6' },
+      splitLine: { lineStyle: { color: '#eef0f5' } },
+    },
+    series: [{ name: '加權指數', type: 'line', smooth: true, showSymbol: false, lineStyle: { width: 2.5 }, areaStyle: { opacity: 0.08 }, data: market.value.data.map((point) => point.value) }],
+  })
+}
+
+function resizeChart() { chart?.resize() }
+watch(analysis, async () => { await nextTick(); drawChart() })
+watch(market, async () => { await nextTick(); if (viewMode.value === 'market') drawMarketChart() })
+onMounted(() => window.addEventListener('resize', resizeChart))
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeChart)
+  chart?.dispose()
+})
+
+void loadMarket()
+</script>
+
+<template>
+  <main class="page-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="返回大盤總覽" @click.prevent="goHome">
+        <span class="brand-mark">Q</span>
+        <span>quant<span class="brand-light">lab</span><small>TAIWAN EQUITY RESEARCH</small></span>
+      </a>
+      <span class="topbar-note"><span class="status-dot"></span>研究模式 · 不連接券商</span>
+    </header>
+
+    <section class="intro">
+      <div class="eyebrow">MARKET RESEARCH / 台灣市場</div>
+      <h1>詩瑾的<span>台股發財夢。</span></h1>
+      <p>股票小白也能選出最適合自己的一套股票清單。</p>
+    </section>
+
+    <section class="search-card" aria-label="股票查詢">
+      <div class="search-label">搜尋台股</div>
+      <div class="search-input-wrap">
+        <form class="search-row" @submit.prevent="searchStock">
+          <span class="search-icon">⌕</span>
+          <input v-model="symbol" aria-label="股票代號或名稱" placeholder="輸入股票代號或名稱，例如 台積電" autocomplete="off" @input="handleSearchInput" />
+          <button type="submit" :disabled="loading">{{ loading ? '分析中…' : '開始分析' }} <span>→</span></button>
+        </form>
+        <div v-if="showSuggestions && suggestions.length" class="search-suggestions">
+          <button v-for="stock in suggestions" :key="stock.stock_id" type="button" class="search-suggestion" @mousedown.prevent @click="chooseStock(stock)">
+            <span>{{ stock.stock_name }}</span><small>{{ stock.stock_id }}</small>
+          </button>
+        </div>
+      </div>
+      <div class="quick-hint">輸入股票代號或名稱；離線示範資料：<button class="text-button" @click="symbol = '2330'; selectedStockId = '2330'; searchStock()">2330 台積電</button></div>
+    </section>
+
+    <p v-if="error" class="error-banner">{{ error }}</p>
+
+    <template v-if="viewMode === 'market'">
+      <div class="section-heading">
+        <div><div class="eyebrow">TAIWAN MARKET</div><h2>市場總覽 <span>加權指數（TAIEX）</span></h2></div>
+        <div class="demo-pill live-source"><span></span>最近交易日</div>
+      </div>
+      <p v-if="marketError" class="error-banner">{{ marketError }} <button class="text-button" @click="loadMarket">重新載入</button></p>
+      <p v-else-if="marketLoading && !market" class="market-message">正在載入大盤指數…</p>
+      <template v-if="market">
+        <section class="metrics-grid market-metrics">
+          <article class="metric-card primary-metric">
+            <div class="metric-label">加權指數 <span>TAIEX</span></div>
+            <div class="metric-value">{{ market.latest_value.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) }}</div>
+            <div class="metric-foot">資料日期 {{ market.latest_data_date }} <span class="neutral-change">最近交易日</span></div>
+          </article>
+          <article class="metric-card"><div class="metric-label">當日開盤 <span>指數點</span></div><div class="metric-value compact">{{ market.session_open.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) }}</div><div class="metric-foot">盤中第一筆指數</div></article>
+          <article class="metric-card"><div class="metric-label">當日最高 <span>指數點</span></div><div class="metric-value compact">{{ market.session_high.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) }}</div><div class="metric-foot">最近交易日盤中高點</div></article>
+          <article class="metric-card"><div class="metric-label">當日最低 <span>指數點</span></div><div class="metric-value compact">{{ market.session_low.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) }}</div><div class="metric-foot">最近交易日盤中低點</div></article>
+        </section>
+        <section class="chart-card">
+          <div class="chart-heading"><div><h3>加權指數走勢</h3><p>最近交易日盤中變化（每分鐘取樣）</p></div><span class="chart-period">{{ market.latest_data_date }}</span></div>
+          <div ref="chartElement" class="chart"></div>
+          <div class="chart-note">資料來源：{{ market.data_source }}。此為指數資料，不是個股價格，也不代表即時報價。</div>
+        </section>
+        <div class="notice"><span class="notice-icon">i</span><span>{{ market.notice }}</span></div>
+      </template>
+    </template>
+
+    <template v-else-if="analysis">
+      <div class="section-heading">
+        <div><div class="eyebrow">STOCK OVERVIEW</div><h2>{{ analysis.symbol }} <span>{{ analysis.name }}</span></h2></div>
+        <div class="demo-pill" :class="{ 'live-source': !analysis.is_demo_data }"><span></span>{{ analysis.is_demo_data ? '示範資料' : '歷史日線' }}</div>
+      </div>
+
+      <section class="metrics-grid">
+        <article class="metric-card primary-metric">
+          <div class="metric-label">最新收盤價 <span>新台幣</span></div>
+          <div class="metric-value">{{ latest?.close?.toLocaleString('zh-TW') }}<small>.00</small></div>
+          <div class="metric-foot">資料日期 {{ analysis.latest_data_date }} <span class="neutral-change">{{ analysis.is_realtime ? '即時行情' : '盤後資料' }}</span></div>
+        </article>
+        <article class="metric-card"><div class="metric-label">MA5 <span>短期趨勢</span></div><div class="metric-value compact">{{ latest?.ma5?.toFixed(2) ?? '—' }}</div><div class="metric-foot">近 5 個交易日平均</div></article>
+        <article class="metric-card"><div class="metric-label">MA20 <span>中期趨勢</span></div><div class="metric-value compact">{{ latest?.ma20?.toFixed(2) ?? '—' }}</div><div class="metric-foot">近 20 個交易日平均</div></article>
+        <article class="metric-card"><div class="metric-label">MA60 <span>長期趨勢</span></div><div class="metric-value compact">{{ latest?.ma60?.toFixed(2) ?? '—' }}</div><div class="metric-foot">近 60 個交易日平均</div></article>
+      </section>
+
+      <section class="chart-card">
+        <div class="chart-heading"><div><h3>價格與均線</h3><p>收盤價走勢及移動平均線</p></div><span class="chart-period">{{ analysis.is_demo_data ? '示範樣本' : '近一年日線' }}</span></div>
+        <div ref="chartElement" class="chart"></div>
+        <div class="chart-note">均線需累積足夠交易日才會顯示；成交量欄位以股為單位。</div>
+      </section>
+      <section class="news-card" aria-label="相關新聞">
+        <div class="news-heading">
+          <div><div class="eyebrow">RELATED NEWS</div><h3>相關新聞</h3><p>由新到舊 · 每次最多載入 10 則 · 僅保留一年</p></div>
+          <span v-if="newsSource" class="news-source-pill">{{ newsSource }}</span>
+        </div>
+        <p v-if="newsItems.length === 0 && newsLoading" class="news-empty">正在搜尋相關新聞…</p>
+        <p v-else-if="newsItems.length === 0 && !newsLoading && !newsError" class="news-empty">目前找不到這檔股票的新聞資料。</p>
+        <article v-for="item in newsItems" :key="item.url" class="news-item">
+          <div class="news-meta"><span>{{ item.source }}</span><time :datetime="item.published_at">{{ new Date(item.published_at).toLocaleString('zh-TW') }}</time></div>
+          <a class="news-title" :href="item.url" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
+          <p class="news-summary">{{ item.summary || '來源未提供摘要，請點選標題閱讀原文。' }}</p>
+        </article>
+        <p v-if="newsError" class="news-error">{{ newsError }}</p>
+        <button v-if="newsHasMore && newsAutoPaused && !newsLoading" class="news-more-button" @click="loadNewsPage">繼續搜尋較舊新聞</button>
+        <p v-else-if="newsLoading && newsItems.length" class="news-status">正在載入更多新聞…</p>
+        <p v-else-if="!newsHasMore && newsItems.length" class="news-status">已顯示目前可取得的新聞。</p>
+        <div ref="newsLoadSentinel" class="news-sentinel" aria-hidden="true"></div>
+      </section>
+      <div class="notice"><span class="notice-icon">i</span><span>{{ analysis.notice }}資料來源：{{ analysis.data_source }}。來源資料可能延遲或更正，請自行核對。</span></div>
+    </template>
+
+    <footer>QUANTLAB · 個人研究專案 <span>資料為示範用途</span></footer>
+  </main>
+</template>
