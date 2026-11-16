@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import AuthView from './views/AuthView.vue'
+import RiskAssessmentView from './views/RiskAssessmentView.vue'
+import { ApiError, clearAccessToken, getAccessToken, apiRequest } from './api/http'
+import { getCurrentUser } from './api/auth'
+import type { UserResponse } from './api/auth'
+import type { RiskProfile } from './api/risk'
 
 type PriceRow = {
   date: string
@@ -57,6 +63,9 @@ const selectedStockId = ref('')
 const suggestions = ref<StockMatch[]>([])
 const showSuggestions = ref(false)
 const analysis = ref<Analysis | null>(null)
+const activeSection = ref<'market' | 'risk' | 'auth'>('market')
+const currentUser = ref<UserResponse | null>(null)
+const authNotice = ref('')
 const viewMode = ref<'market' | 'stock'>('market')
 const market = ref<MarketOverview | null>(null)
 const marketLoading = ref(false)
@@ -77,21 +86,42 @@ let suggestTimer: number | undefined
 let newsObserver: IntersectionObserver | undefined
 
 const latest = computed(() => analysis.value?.data.at(-1))
+const previous = computed(() => analysis.value?.data.at(-2))
+const marketChange = computed(() => {
+  if (!market.value) return null
+  const change = market.value.latest_value - market.value.session_open
+  return { value: change, percent: market.value.session_open ? change / market.value.session_open * 100 : 0 }
+})
+const stockChange = computed(() => {
+  if (!latest.value || !previous.value) return null
+  const change = latest.value.close - previous.value.close
+  return { value: change, percent: previous.value.close ? change / previous.value.close * 100 : 0 }
+})
+
+function trendClass(value: number | null | undefined, reference: number | null | undefined): string {
+  if (value == null || reference == null || value === reference) return 'trend-neutral'
+  return value > reference ? 'trend-up' : 'trend-down'
+}
+
+function formatChange(change: { value: number; percent: number } | null): string {
+  if (!change) return '漲跌資料不足'
+  const arrow = change.value > 0 ? '▲' : change.value < 0 ? '▼' : '－'
+  const sign = change.value > 0 ? '+' : ''
+  return `${arrow} ${sign}${change.value.toFixed(2)} (${sign}${change.percent.toFixed(2)}%)`
+}
 
 async function findStocks(query: string): Promise<StockMatch[]> {
-  const response = await fetch(`http://127.0.0.1:8000/api/stocks/search?q=${encodeURIComponent(query)}`)
-  const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.detail ?? `股票搜尋失敗（HTTP ${response.status}）`)
-  return body.results as StockMatch[]
+  const body = await apiRequest<{ results: StockMatch[] }>(
+    `/api/stocks/search?q=${encodeURIComponent(query)}`,
+  )
+  return body.results
 }
 
 async function loadMarket() {
   marketLoading.value = true
   marketError.value = ''
   try {
-    const response = await fetch('http://127.0.0.1:8000/api/market/taiex')
-    const body = await response.json().catch(() => ({})) as MarketOverview & { detail?: string }
-    if (!response.ok) throw new Error(body.detail ?? `大盤資料載入失敗（HTTP ${response.status}）`)
+    const body = await apiRequest<MarketOverview>('/api/market/taiex')
     market.value = body
     await nextTick()
     if (viewMode.value === 'market') drawMarketChart()
@@ -108,6 +138,7 @@ function goHome() {
   newsObserver?.disconnect()
   analysis.value = null
   viewMode.value = 'market'
+  activeSection.value = 'market'
   error.value = ''
   void loadMarket()
 }
@@ -122,9 +153,9 @@ async function loadNewsPage() {
   try {
     const params = new URLSearchParams({ limit: '10' })
     if (newsCursor.value) params.set('cursor', newsCursor.value)
-    const response = await fetch(`http://127.0.0.1:8000/api/stocks/${encodeURIComponent(currentSymbol)}/news?${params}`)
-    const body = await response.json().catch(() => ({})) as NewsPage & { detail?: string }
-    if (!response.ok) throw new Error(body.detail ?? `新聞載入失敗（HTTP ${response.status}）`)
+    const body = await apiRequest<NewsPage>(
+      `/api/stocks/${encodeURIComponent(currentSymbol)}/news?${params}`,
+    )
 
     // 以 URL 去重，前端再做一次保護，避免重新查詢或分頁時重複顯示。
     const existingUrls = new Set(newsItems.value.map((item) => item.url))
@@ -220,13 +251,11 @@ async function searchStock() {
       }
     }
 
-    const response = await fetch(`http://127.0.0.1:8000/api/stocks/${encodeURIComponent(requestedSymbol)}/analysis`)
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}))
-      throw new Error(body.detail ?? `查詢失敗（HTTP ${response.status}）`)
-    }
+    const result = await apiRequest<Analysis>(
+      `/api/stocks/${encodeURIComponent(requestedSymbol)}/analysis`,
+    )
     selectedStockId.value = requestedSymbol
-    analysis.value = await response.json() as Analysis
+    analysis.value = result
     newsHasMore.value = true
     void loadNewsPage()
     await nextTick()
@@ -242,6 +271,56 @@ watch([newsItems, newsHasMore, newsAutoPaused, newsLoading], async () => {
   await nextTick()
   observeNewsSentinel()
 })
+
+async function loadCurrentUser() {
+  if (!getAccessToken()) return
+  try {
+    currentUser.value = await getCurrentUser()
+  } catch (cause) {
+    if (!(cause instanceof ApiError) || cause.status !== 401) {
+      authNotice.value = cause instanceof Error ? cause.message : '無法讀取登入狀態。'
+    }
+  }
+}
+
+function handleUnauthorized() {
+  currentUser.value = null
+  activeSection.value = 'auth'
+  authNotice.value = '登入狀態已過期，請重新登入。'
+}
+
+function openRiskAssessment() {
+  if (!currentUser.value) {
+    activeSection.value = 'auth'
+    authNotice.value = '請先登入，才能保存個人風險評估。'
+    return
+  }
+  authNotice.value = ''
+  activeSection.value = 'risk'
+}
+
+function onAuthenticated(user: UserResponse) {
+  currentUser.value = user
+  authNotice.value = ''
+  activeSection.value = 'market'
+}
+
+function onRiskProfileUpdated(profile: RiskProfile) {
+  if (!currentUser.value) return
+  currentUser.value = {
+    ...currentUser.value,
+    risk_score: profile.risk_score,
+    risk_type: profile.risk_type,
+    risk_type_label: profile.risk_type_label,
+  }
+}
+
+function logout() {
+  clearAccessToken()
+  currentUser.value = null
+  authNotice.value = ''
+  activeSection.value = 'market'
+}
 
 function drawChart() {
   if (!chartElement.value || !analysis.value) return
@@ -301,9 +380,24 @@ function drawMarketChart() {
 function resizeChart() { chart?.resize() }
 watch(analysis, async () => { await nextTick(); drawChart() })
 watch(market, async () => { await nextTick(); if (viewMode.value === 'market') drawMarketChart() })
-onMounted(() => window.addEventListener('resize', resizeChart))
+watch([activeSection, viewMode], async ([section, mode]) => {
+  // Vue 切頁會卸載圖表 DOM；釋放舊 ECharts 實例，回到看盤頁時再綁定新 DOM。
+  chart?.dispose()
+  chart = undefined
+  if (section !== 'market') return
+
+  await nextTick()
+  if (mode === 'market' && market.value) drawMarketChart()
+  if (mode === 'stock' && analysis.value) drawChart()
+})
+onMounted(() => {
+  window.addEventListener('resize', resizeChart)
+  window.addEventListener('auth:unauthorized', handleUnauthorized)
+  void loadCurrentUser()
+})
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeChart)
+  window.removeEventListener('auth:unauthorized', handleUnauthorized)
   chart?.dispose()
 })
 
@@ -317,9 +411,33 @@ void loadMarket()
         <span class="brand-mark">Q</span>
         <span>quant<span class="brand-light">lab</span><small>TAIWAN EQUITY RESEARCH</small></span>
       </a>
+      <nav class="primary-nav" aria-label="主要導覽">
+        <button type="button" :class="{ active: activeSection === 'market' }" @click="activeSection = 'market'">看盤分析</button>
+        <button type="button" :class="{ active: activeSection === 'risk' }" @click="openRiskAssessment">風險測驗</button>
+      </nav>
       <span class="topbar-note"><span class="status-dot"></span>研究模式 · 不連接券商</span>
+      <div class="account-nav">
+        <template v-if="currentUser">
+          <span class="account-name">{{ currentUser.full_name }}</span>
+          <span class="account-risk" :class="currentUser.risk_type?.toLowerCase()">
+            {{ currentUser.risk_type_label ?? '尚未完成測驗' }}
+          </span>
+          <button type="button" class="account-button" @click="logout">登出</button>
+        </template>
+        <button v-else type="button" class="account-button" @click="activeSection = 'auth'; authNotice = ''">登入 / 註冊</button>
+      </div>
     </header>
 
+    <AuthView
+      v-if="activeSection === 'auth'"
+      :notice="authNotice"
+      @authenticated="onAuthenticated"
+    />
+    <RiskAssessmentView
+      v-else-if="activeSection === 'risk' && currentUser"
+      @profile-updated="onRiskProfileUpdated"
+    />
+    <template v-else>
     <section class="intro">
       <div class="eyebrow">MARKET RESEARCH / 台灣市場</div>
       <h1>詩瑾的<span>台股發財夢。</span></h1>
@@ -356,12 +474,12 @@ void loadMarket()
         <section class="metrics-grid market-metrics">
           <article class="metric-card primary-metric">
             <div class="metric-label">加權指數 <span>TAIEX</span></div>
-            <div class="metric-value">{{ market.latest_value.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) }}</div>
-            <div class="metric-foot">資料日期 {{ market.latest_data_date }} <span class="neutral-change">最近交易日</span></div>
+            <div class="metric-value" :class="trendClass(market.latest_value, market.session_open)">{{ market.latest_value.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) }}</div>
+            <div class="metric-foot">資料日期 {{ market.latest_data_date }} <span class="trend-change" :class="trendClass(market.latest_value, market.session_open)">{{ formatChange(marketChange) }}（較開盤）</span></div>
           </article>
           <article class="metric-card"><div class="metric-label">當日開盤 <span>指數點</span></div><div class="metric-value compact">{{ market.session_open.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) }}</div><div class="metric-foot">盤中第一筆指數</div></article>
-          <article class="metric-card"><div class="metric-label">當日最高 <span>指數點</span></div><div class="metric-value compact">{{ market.session_high.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) }}</div><div class="metric-foot">最近交易日盤中高點</div></article>
-          <article class="metric-card"><div class="metric-label">當日最低 <span>指數點</span></div><div class="metric-value compact">{{ market.session_low.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) }}</div><div class="metric-foot">最近交易日盤中低點</div></article>
+          <article class="metric-card"><div class="metric-label">當日最高 <span>指數點</span></div><div class="metric-value compact" :class="trendClass(market.session_high, market.session_open)">{{ market.session_high.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) }}</div><div class="metric-foot">相較當日開盤</div></article>
+          <article class="metric-card"><div class="metric-label">當日最低 <span>指數點</span></div><div class="metric-value compact" :class="trendClass(market.session_low, market.session_open)">{{ market.session_low.toLocaleString('zh-TW', { maximumFractionDigits: 2 }) }}</div><div class="metric-foot">相較當日開盤</div></article>
         </section>
         <section class="chart-card">
           <div class="chart-heading"><div><h3>加權指數走勢</h3><p>最近交易日盤中變化（每分鐘取樣）</p></div><span class="chart-period">{{ market.latest_data_date }}</span></div>
@@ -381,12 +499,12 @@ void loadMarket()
       <section class="metrics-grid">
         <article class="metric-card primary-metric">
           <div class="metric-label">最新收盤價 <span>新台幣</span></div>
-          <div class="metric-value">{{ latest?.close?.toLocaleString('zh-TW') }}<small>.00</small></div>
-          <div class="metric-foot">資料日期 {{ analysis.latest_data_date }} <span class="neutral-change">{{ analysis.is_realtime ? '即時行情' : '盤後資料' }}</span></div>
+          <div class="metric-value" :class="trendClass(latest?.close, previous?.close)">{{ latest?.close?.toLocaleString('zh-TW') }}<small>.00</small></div>
+          <div class="metric-foot">資料日期 {{ analysis.latest_data_date }} <span class="trend-change" :class="trendClass(latest?.close, previous?.close)">{{ formatChange(stockChange) }}</span> <span class="neutral-change">{{ analysis.is_realtime ? '即時行情' : '盤後資料' }}</span></div>
         </article>
-        <article class="metric-card"><div class="metric-label">MA5 <span>短期趨勢</span></div><div class="metric-value compact">{{ latest?.ma5?.toFixed(2) ?? '—' }}</div><div class="metric-foot">近 5 個交易日平均</div></article>
-        <article class="metric-card"><div class="metric-label">MA20 <span>中期趨勢</span></div><div class="metric-value compact">{{ latest?.ma20?.toFixed(2) ?? '—' }}</div><div class="metric-foot">近 20 個交易日平均</div></article>
-        <article class="metric-card"><div class="metric-label">MA60 <span>長期趨勢</span></div><div class="metric-value compact">{{ latest?.ma60?.toFixed(2) ?? '—' }}</div><div class="metric-foot">近 60 個交易日平均</div></article>
+        <article class="metric-card"><div class="metric-label">MA5 <span>短期趨勢</span></div><div class="metric-value compact" :class="trendClass(latest?.ma5, previous?.ma5)">{{ latest?.ma5?.toFixed(2) ?? '—' }}</div><div class="metric-foot">近 5 個交易日平均</div></article>
+        <article class="metric-card"><div class="metric-label">MA20 <span>中期趨勢</span></div><div class="metric-value compact" :class="trendClass(latest?.ma20, previous?.ma20)">{{ latest?.ma20?.toFixed(2) ?? '—' }}</div><div class="metric-foot">近 20 個交易日平均</div></article>
+        <article class="metric-card"><div class="metric-label">MA60 <span>長期趨勢</span></div><div class="metric-value compact" :class="trendClass(latest?.ma60, previous?.ma60)">{{ latest?.ma60?.toFixed(2) ?? '—' }}</div><div class="metric-foot">近 60 個交易日平均</div></article>
       </section>
 
       <section class="chart-card">
@@ -416,5 +534,6 @@ void loadMarket()
     </template>
 
     <footer>QUANTLAB · 個人研究專案 <span>資料為示範用途</span></footer>
+    </template>
   </main>
 </template>
