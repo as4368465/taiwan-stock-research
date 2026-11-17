@@ -4,6 +4,7 @@ import * as echarts from 'echarts'
 import AuthView from './views/AuthView.vue'
 import RiskAssessmentView from './views/RiskAssessmentView.vue'
 import PortfolioView from './views/PortfolioView.vue'
+import DailyRecommendationsView from './views/DailyRecommendationsView.vue'
 import { ApiError, clearAccessToken, getAccessToken, apiRequest } from './api/http'
 import { getCurrentUser } from './api/auth'
 import type { UserResponse } from './api/auth'
@@ -64,7 +65,7 @@ const selectedStockId = ref('')
 const suggestions = ref<StockMatch[]>([])
 const showSuggestions = ref(false)
 const analysis = ref<Analysis | null>(null)
-const activeSection = ref<'market' | 'risk' | 'portfolio' | 'auth'>('market')
+const activeSection = ref<'market' | 'risk' | 'portfolio' | 'daily' | 'auth'>('market')
 const currentUser = ref<UserResponse | null>(null)
 const authNotice = ref('')
 const viewMode = ref<'market' | 'stock'>('market')
@@ -310,6 +311,16 @@ function openPortfolio() {
   activeSection.value = 'portfolio'
 }
 
+function openDailyRecommendations() {
+  if (!currentUser.value) {
+    activeSection.value = 'auth'
+    authNotice.value = '請先登入，才能使用個人化每日推薦。'
+    return
+  }
+  authNotice.value = ''
+  activeSection.value = 'daily'
+}
+
 function onAuthenticated(user: UserResponse) {
   currentUser.value = user
   authNotice.value = ''
@@ -426,6 +437,7 @@ void loadMarket()
         <button type="button" :class="{ active: activeSection === 'market' }" @click="activeSection = 'market'">看盤分析</button>
         <button type="button" :class="{ active: activeSection === 'risk' }" @click="openRiskAssessment">風險測驗</button>
         <button type="button" :class="{ active: activeSection === 'portfolio' }" @click="openPortfolio">庫存診斷</button>
+        <button type="button" :class="{ active: activeSection === 'daily' }" @click="openDailyRecommendations">每日推薦</button>
       </nav>
       <span class="topbar-note"><span class="status-dot"></span>研究模式 · 不連接券商</span>
       <div class="account-nav">
@@ -450,6 +462,10 @@ void loadMarket()
       @profile-updated="onRiskProfileUpdated"
     />
     <PortfolioView v-else-if="activeSection === 'portfolio' && currentUser" />
+    <DailyRecommendationsView
+      v-else-if="activeSection === 'daily' && currentUser"
+      :risk-type-label="currentUser.risk_type_label"
+    />
     <template v-else>
     <section class="intro">
       <div class="eyebrow">MARKET RESEARCH / 台灣市場</div>

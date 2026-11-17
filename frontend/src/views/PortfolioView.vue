@@ -125,14 +125,14 @@ onMounted(loadPortfolio)
     <section class="portfolio-form-card">
       <h3>新增持股</h3>
       <form class="portfolio-form" @submit.prevent="addItem">
-        <label>股票代號
-          <input v-model="form.stock_symbol" required pattern="\d{4,6}" placeholder="例如 2330" />
+        <label class="form-field-label">股票代號
+          <input v-model="form.stock_symbol" class="form-control" required pattern="\d{4,6}" placeholder="例如 2330" />
         </label>
-        <label>買進均價（元）
-          <input v-model.number="form.average_cost" required type="number" min="0.01" step="0.01" />
+        <label class="form-field-label">買進均價（元）
+          <input v-model.number="form.average_cost" class="form-control" required type="number" min="0.01" step="0.01" />
         </label>
-        <label>持有股數
-          <input v-model.number="form.shares" required type="number" min="1" step="1" />
+        <label class="form-field-label">持有股數
+          <input v-model.number="form.shares" class="form-control" required type="number" min="1" step="1" />
         </label>
         <button class="auth-submit" type="submit" :disabled="saving">{{ saving ? '新增中…' : '加入庫存' }}</button>
       </form>
@@ -154,8 +154,8 @@ onMounted(loadPortfolio)
       </div>
 
       <div v-if="editingId === item.id" class="portfolio-edit-form">
-        <label>買進均價<input v-model.number="editForm.average_cost" type="number" min="0.01" step="0.01" /></label>
-        <label>持有股數<input v-model.number="editForm.shares" type="number" min="1" step="1" /></label>
+        <label class="form-field-label">買進均價<input v-model.number="editForm.average_cost" class="form-control" type="number" min="0.01" step="0.01" /></label>
+        <label class="form-field-label">持有股數<input v-model.number="editForm.shares" class="form-control" type="number" min="1" step="1" /></label>
         <button class="account-button" type="button" @click="saveEdit(item.id)">儲存</button>
         <button class="account-button" type="button" @click="editingId = null">取消</button>
       </div>

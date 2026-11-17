@@ -104,13 +104,13 @@ function recommendedDrawdownRange(result: RiskProfile): string {
           <div><span>問卷回撤參考</span><strong>{{ recommendedDrawdownRange(profile) }}</strong></div>
         </div>
         <div class="risk-adjustments">
-          <label>我的預期年化報酬率 (%)
+          <label class="form-field-label">我的預期年化報酬率 (%)
             <small>記錄你希望追求的年報酬目標，供個人研究設定參考。</small>
-            <input v-model.number="targetReturn" type="number" min="0.01" max="100" step="0.01" />
+            <input v-model.number="targetReturn" class="form-control" type="number" min="0.01" max="100" step="0.01" />
           </label>
-          <label>我能接受的最大虧損 (%)
+          <label class="form-field-label">我能接受的最大虧損 (%)
             <small>記錄你可接受的虧損幅度，供個人風險控管參考。</small>
-            <input v-model.number="maxDrawdown" type="number" min="0.01" max="100" step="0.01" />
+            <input v-model.number="maxDrawdown" class="form-control" type="number" min="0.01" max="100" step="0.01" />
           </label>
         </div>
         <p class="risk-disclaimer">這兩項目前會儲存在你的風險屬性資料中，作為個人研究與後續風險控管功能的參考；不會改變目前的個股分析，也不會自動下單。問卷結果不代表投資建議或報酬保證。</p>
@@ -122,7 +122,7 @@ function recommendedDrawdownRange(result: RiskProfile): string {
       <form class="risk-questionnaire" @submit.prevent="saveAssessment">
         <fieldset v-for="(question, index) in questions" :key="question.id" class="risk-question">
           <legend><span>0{{ index + 1 }}</span>{{ question.prompt }}</legend>
-          <label v-for="option in question.options" :key="option.value" class="risk-option">
+          <label v-for="option in question.options" :key="option.value" class="risk-option choice-option">
             <input v-model.number="answers[question.id]" type="radio" :name="question.id" :value="option.value" />
             <span>{{ option.label }}</span>
           </label>
