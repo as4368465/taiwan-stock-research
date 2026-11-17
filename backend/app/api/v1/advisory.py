@@ -11,6 +11,7 @@ from app.agents.daily_recommender_agent import (
 )
 from app.agents.sell_advisor_agent import AdvisoryUnavailableError, diagnose_sell
 from app.api.v1.dependencies import get_current_user
+from app.core.enums import AiUsageEndpoint
 from app.db.models import User
 from app.db.session import get_session
 from app.schemas.advisory import SellDiagnosisResponse
@@ -19,6 +20,7 @@ from app.schemas.recommendation import (
     DailyRecommendationResponse,
 )
 from app.services.portfolio_service import PortfolioNotFoundError, get_owned_item
+from app.services.quota_service import QuotaExceededError, consume_ai_quota
 
 router = APIRouter(prefix="/advisory", tags=["advisory"])
 
@@ -30,7 +32,10 @@ async def daily_recommendations(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> DailyRecommendationResponse:
     try:
+        await consume_ai_quota(session, user.id, AiUsageEndpoint.DAILY_RECOMMENDATION)
         return await recommend_daily(session, user, payload)
+    except QuotaExceededError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
     except RecommendationUnavailableError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
@@ -46,7 +51,10 @@ async def sell_diagnosis(
     except PortfolioNotFoundError:
         raise HTTPException(status_code=404, detail="找不到這筆持股") from None
     try:
+        await consume_ai_quota(session, user.id, AiUsageEndpoint.SELL_DIAGNOSIS)
         return await diagnose_sell(session, user, item)
+    except QuotaExceededError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
     except AdvisoryUnavailableError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except ValueError as error:

@@ -12,6 +12,7 @@ from app.services.auth_service import (
     InvalidCredentialsError,
     authenticate_user,
     build_user_response,
+    create_demo_login_token,
     register_user,
 )
 
@@ -44,6 +45,14 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
     return token
+
+
+@router.post("/demo-login", response_model=TokenResponse)
+async def demo_login(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TokenResponse:
+    """簽發共用展示帳號 Token；其 AI 請求共用同一份每日額度。"""
+    return await create_demo_login_token(session)
 
 
 @router.get("/me", response_model=UserResponse)

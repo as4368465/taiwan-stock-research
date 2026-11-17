@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-4o-mini"
+    user_daily_ai_limit: int = Field(default=5, ge=1)
+    global_daily_ai_limit: int = Field(default=50, ge=1)
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

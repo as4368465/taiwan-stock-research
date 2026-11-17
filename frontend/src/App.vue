@@ -30,6 +30,7 @@ type Analysis = {
   data_source: string
   latest_data_date: string | null
   is_realtime: boolean
+  updated_at: string
   notice: string
   latest_close: number | null
   data: PriceRow[]
@@ -41,6 +42,7 @@ type MarketOverview = {
   is_demo_data: boolean
   data_source: string
   latest_data_date: string | null
+  updated_at: string
   latest_value: number
   session_open: number
   session_high: number
@@ -114,6 +116,14 @@ function formatChange(change: { value: number; percent: number } | null): string
   return `${arrow} ${sign}${change.value.toFixed(2)} (${sign}${change.percent.toFixed(2)}%)`
 }
 
+function formatTaipeiTime(value: string): string {
+  return new Date(value).toLocaleString('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  })
+}
+
 async function findStocks(query: string): Promise<StockMatch[]> {
   const body = await apiRequest<{ results: StockMatch[] }>(
     `/api/stocks/search?q=${encodeURIComponent(query)}`,
@@ -121,11 +131,12 @@ async function findStocks(query: string): Promise<StockMatch[]> {
   return body.results
 }
 
-async function loadMarket() {
+async function loadMarket(forceRefresh = false) {
   marketLoading.value = true
   marketError.value = ''
   try {
-    const body = await apiRequest<MarketOverview>('/api/market/taiex')
+    const suffix = forceRefresh ? '?refresh=true' : ''
+    const body = await apiRequest<MarketOverview>(`/api/market/taiex${suffix}`)
     market.value = body
     await nextTick()
     if (viewMode.value === 'market') drawMarketChart()
@@ -217,7 +228,7 @@ function chooseStock(stock: StockMatch) {
   void searchStock()
 }
 
-async function searchStock() {
+async function searchStock(forceRefresh = false) {
   const query = symbol.value.trim()
   if (!query) return
 
@@ -255,8 +266,9 @@ async function searchStock() {
       }
     }
 
+    const refreshQuery = forceRefresh ? '?refresh=true' : ''
     const result = await apiRequest<Analysis>(
-      `/api/stocks/${encodeURIComponent(requestedSymbol)}/analysis`,
+      `/api/stocks/${encodeURIComponent(requestedSymbol)}/analysis${refreshQuery}`,
     )
     selectedStockId.value = requestedSymbol
     analysis.value = result
@@ -479,7 +491,7 @@ void loadMarket()
     <section class="search-card" aria-label="股票查詢">
       <div class="search-label">搜尋台股</div>
       <div class="search-input-wrap">
-        <form class="search-row" @submit.prevent="searchStock">
+        <form class="search-row" @submit.prevent="searchStock()">
           <span class="search-icon">⌕</span>
           <input v-model="symbol" aria-label="股票代號或名稱" placeholder="輸入股票代號或名稱，例如 台積電" autocomplete="off" @input="handleSearchInput" />
           <button type="submit" :disabled="loading">{{ loading ? '分析中…' : '開始分析' }} <span>→</span></button>
@@ -500,7 +512,13 @@ void loadMarket()
         <div><div class="eyebrow">TAIWAN MARKET</div><h2>市場總覽 <span>加權指數（TAIEX）</span></h2></div>
         <div class="demo-pill live-source"><span></span>最近交易日</div>
       </div>
-      <p v-if="marketError" class="error-banner">{{ marketError }} <button class="text-button" @click="loadMarket">重新載入</button></p>
+      <div v-if="market" class="quote-controls">
+        <span>資料基準時間：{{ formatTaipeiTime(market.updated_at) }}</span>
+        <button class="news-more-button" type="button" :disabled="marketLoading" @click="loadMarket(true)">
+          {{ marketLoading ? '更新中…' : '手動重新整理報價' }}
+        </button>
+      </div>
+      <p v-if="marketError" class="error-banner">{{ marketError }} <button class="text-button" @click="loadMarket(false)">重新載入</button></p>
       <p v-else-if="marketLoading && !market" class="market-message">正在載入大盤指數…</p>
       <template v-if="market">
         <section class="metrics-grid market-metrics">
@@ -526,6 +544,12 @@ void loadMarket()
       <div class="section-heading">
         <div><div class="eyebrow">STOCK OVERVIEW</div><h2>{{ analysis.symbol }} <span>{{ analysis.name }}</span></h2></div>
         <div class="demo-pill" :class="{ 'live-source': !analysis.is_demo_data }"><span></span>{{ analysis.is_demo_data ? '示範資料' : '歷史日線' }}</div>
+      </div>
+      <div class="quote-controls">
+        <span>資料基準時間：{{ formatTaipeiTime(analysis.updated_at) }}</span>
+        <button class="news-more-button" type="button" :disabled="loading" @click="searchStock(true)">
+          {{ loading ? '更新中…' : '手動重新整理報價' }}
+        </button>
       </div>
 
       <section class="metrics-grid">

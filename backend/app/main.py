@@ -15,11 +15,13 @@ from app.api.v1 import (
     market,
     news,
     portfolio,
+    quota,
     risk,
     stocks,
 )
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal, create_tables, engine
+from app.services.auth_service import ensure_demo_account
 
 
 def create_app(
@@ -29,6 +31,8 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await create_tables(database_engine)
+        async with session_factory() as session:
+            await ensure_demo_account(session)
         yield
         await database_engine.dispose()
 
@@ -59,6 +63,7 @@ def create_app(
     api.include_router(risk.router, prefix="/api/v1")
     api.include_router(portfolio.router, prefix="/api/v1")
     api.include_router(advisory.router, prefix="/api/v1")
+    api.include_router(quota.router, prefix="/api/v1")
     api.include_router(glossary.router, prefix="/api/v1")
     return api
 

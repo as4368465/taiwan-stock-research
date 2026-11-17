@@ -48,6 +48,20 @@ export type SellDiagnosis = {
   disclaimer: string
 }
 
+export type AiQuota = {
+  usage_date: string
+  user_used: number
+  user_limit: number
+  user_remaining: number
+  global_used: number
+  global_limit: number
+  global_remaining: number
+}
+
+export function getAiQuota() {
+  return apiRequest<AiQuota>('/api/v1/advisory/quota')
+}
+
 export function getSellDiagnosis(itemId: number) {
   return apiRequest<SellDiagnosis>(`/api/v1/advisory/sell-diagnosis/${itemId}`, {
     method: 'POST',

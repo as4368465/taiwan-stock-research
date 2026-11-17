@@ -25,6 +25,12 @@ export async function loginUser(payload: Pick<UserCredentials, 'email' | 'passwo
   return token
 }
 
+export async function loginDemoUser() {
+  const token = await postJson<TokenResponse>('/api/v1/auth/demo-login', {})
+  saveAccessToken(token.access_token)
+  return token
+}
+
 export function getCurrentUser() {
   return apiRequest<UserResponse>('/api/v1/auth/me')
 }

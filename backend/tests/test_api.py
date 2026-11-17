@@ -10,6 +10,7 @@ client = TestClient(app)
 
 
 def test_stock_analysis_api_keeps_existing_response(monkeypatch) -> None:
+    market_service._market_cache.clear()
     monkeypatch.setattr(
         market_service,
         "get_provider",
@@ -22,6 +23,7 @@ def test_stock_analysis_api_keeps_existing_response(monkeypatch) -> None:
     payload = response.json()
     assert payload["symbol"] == "2330"
     assert payload["name"] == "台積電（示範）"
+    assert payload["updated_at"].endswith("+08:00")
     assert payload["data"]
     assert {"date", "close", "ma5", "ma20", "ma60"} <= payload["data"][-1].keys()
 

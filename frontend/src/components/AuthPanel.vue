@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { getCurrentUser, loginUser, registerUser } from '../api/auth'
+import { getCurrentUser, loginDemoUser, loginUser, registerUser } from '../api/auth'
 import type { UserResponse } from '../api/auth'
 
 const props = defineProps<{ notice?: string }>()
@@ -29,6 +29,19 @@ async function submit() {
   }
 }
 
+async function demoLogin() {
+  loading.value = true
+  error.value = ''
+  try {
+    await loginDemoUser()
+    emit('authenticated', await getCurrentUser())
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '展示登入暫時無法使用，請稍後重試。'
+  } finally {
+    loading.value = false
+  }
+}
+
 function changeMode(nextMode: 'login' | 'register') {
   mode.value = nextMode
   error.value = ''
@@ -48,6 +61,13 @@ function changeMode(nextMode: 'login' | 'register') {
         <button type="button" :class="{ active: mode === 'register' }" @click="changeMode('register')">註冊</button>
       </div>
       <p v-if="props.notice" class="auth-notice">{{ props.notice }}</p>
+      <button
+        v-if="mode === 'login'"
+        class="demo-login-button"
+        type="button"
+        :disabled="loading"
+        @click="demoLogin"
+      >{{ loading ? '正在進入展示帳號…' : '面試官 / 訪客一鍵體驗登入' }}</button>
       <form class="auth-form" @submit.prevent="submit">
         <label v-if="mode === 'register'">姓名<input v-model.trim="fullName" required maxlength="100" autocomplete="name" /></label>
         <label>Email<input v-model.trim="email" type="email" required maxlength="254" autocomplete="email" /></label>

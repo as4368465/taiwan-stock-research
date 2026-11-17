@@ -1,5 +1,7 @@
 """市場與個股 API 使用的 Pydantic v2 回應模型。"""
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -36,6 +38,7 @@ class StockAnalysisResponse(APIModel):
     data_source: str
     latest_data_date: str | None
     is_realtime: bool
+    updated_at: datetime
     notice: str
     latest_close: float | None
     data: list[PricePoint]
@@ -52,6 +55,7 @@ class MarketOverviewResponse(APIModel):
     is_demo_data: bool
     data_source: str
     latest_data_date: str | None
+    updated_at: datetime
     latest_value: float
     session_open: float
     session_high: float

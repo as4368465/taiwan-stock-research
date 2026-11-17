@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { getAiQuota } from '../api/advisory'
+import type { AiQuota } from '../api/advisory'
 import { addRecommendedStockToPortfolio, createDailyRecommendations, getRecommendationRiskProfile } from '../api/recommendation'
 import type { DailyRecommendationResponse, StockRecommendation } from '../api/recommendation'
 
@@ -12,6 +14,15 @@ const error = ref('')
 const success = ref('')
 const addingSymbol = ref('')
 const hasProfile = ref(false)
+const aiQuota = ref<AiQuota | null>(null)
+
+async function loadAiQuota() {
+  try {
+    aiQuota.value = await getAiQuota()
+  } catch {
+    aiQuota.value = null
+  }
+}
 
 async function loadProfileDefaults() {
   profileLoading.value = true
@@ -38,6 +49,7 @@ async function generate() {
     result.value = null
   } finally {
     loading.value = false
+    await loadAiQuota()
   }
 }
 
@@ -63,7 +75,10 @@ function money(value: number | string) {
   return Number(value).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-onMounted(loadProfileDefaults)
+onMounted(() => {
+  void loadProfileDefaults()
+  void loadAiQuota()
+})
 </script>
 
 <template>
@@ -73,6 +88,10 @@ onMounted(loadProfileDefaults)
       <h1>每日 AI 選股推薦</h1>
       <p>先以固定量化條件篩出候選股，再由 AI 根據你的風險屬性與可查證資料整理理由。系統不會下單。</p>
     </header>
+    <div class="ai-quota-row">
+      <span v-if="aiQuota" class="ai-quota-badge">今日剩餘 AI 體驗次數：{{ aiQuota.user_remaining }} / {{ aiQuota.user_limit }} 次（全站 {{ aiQuota.global_remaining }} / {{ aiQuota.global_limit }}）</span>
+      <span v-else class="ai-quota-badge muted">正在讀取今日額度…</span>
+    </div>
 
     <section class="recommendation-conditions">
       <div class="recommendation-risk-row">

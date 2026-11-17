@@ -1,12 +1,22 @@
 """使用者與風險屬性的 SQLAlchemy ORM 模型。"""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import (
+    JSON,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from app.core.enums import RiskType
+from app.core.enums import AiUsageEndpoint, RiskType
 
 
 class Base(DeclarativeBase):
@@ -28,6 +38,9 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan", uselist=False
     )
     portfolio_items: Mapped[list["PortfolioItem"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    ai_usage_logs: Mapped[list["AiUsageLog"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -84,3 +97,31 @@ class PortfolioItem(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="portfolio_items")
+
+
+class AiUsageLog(Base):
+    __tablename__ = "ai_usage_logs"
+    __table_args__ = (
+        Index("ix_ai_usage_user_date", "user_id", "usage_date"),
+        Index("ix_ai_usage_date", "usage_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    endpoint_type: Mapped[AiUsageEndpoint] = mapped_column(
+        Enum(
+            AiUsageEndpoint,
+            values_callable=lambda enum_type: [item.value for item in enum_type],
+            native_enum=False,
+            create_constraint=True,
+        ),
+        nullable=False,
+    )
+    usage_date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="ai_usage_logs")

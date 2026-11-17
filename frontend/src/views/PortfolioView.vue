@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { getSellDiagnosis } from '../api/advisory'
-import type { SellDiagnosis } from '../api/advisory'
+import { getAiQuota, getSellDiagnosis } from '../api/advisory'
+import type { AiQuota, SellDiagnosis } from '../api/advisory'
 import {
   addPortfolioItem,
   deletePortfolioItem,
@@ -11,6 +11,7 @@ import {
 import type { PortfolioItem } from '../api/portfolio'
 
 const items = ref<PortfolioItem[]>([])
+const aiQuota = ref<AiQuota | null>(null)
 const diagnoses = ref<Record<number, SellDiagnosis>>({})
 const loading = ref(false)
 const saving = ref(false)
@@ -29,6 +30,14 @@ async function loadPortfolio() {
     error.value = cause instanceof Error ? cause.message : '無法讀取持股清單。'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadAiQuota() {
+  try {
+    aiQuota.value = await getAiQuota()
+  } catch {
+    aiQuota.value = null
   }
 }
 
@@ -90,6 +99,7 @@ async function diagnose(itemId: number) {
     error.value = cause instanceof Error ? cause.message : 'AI 診斷暫時無法使用。'
   } finally {
     diagnosisLoadingId.value = null
+    await loadAiQuota()
   }
 }
 
@@ -109,7 +119,10 @@ function formatMoney(value: number | string) {
   return Number(value).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-onMounted(loadPortfolio)
+onMounted(() => {
+  void loadPortfolio()
+  void loadAiQuota()
+})
 </script>
 
 <template>
@@ -118,6 +131,10 @@ onMounted(loadPortfolio)
       <div class="eyebrow">MY PORTFOLIO / SELL DIAGNOSIS</div>
       <h2>我的庫存與 AI 診斷</h2>
       <p>持倉損益以資料來源最近提供的盤後收盤價試算；AI 診斷僅供研究參考，不會下單。</p>
+    </div>
+    <div class="ai-quota-row">
+      <span v-if="aiQuota" class="ai-quota-badge">今日剩餘 AI 體驗次數：{{ aiQuota.user_remaining }} / {{ aiQuota.user_limit }} 次（全站 {{ aiQuota.global_remaining }} / {{ aiQuota.global_limit }}）</span>
+      <span v-else class="ai-quota-badge muted">正在讀取今日額度…</span>
     </div>
 
     <p v-if="error" class="error-banner portfolio-error" role="alert">{{ error }}</p>
