@@ -27,6 +27,9 @@ class User(Base):
     risk_profile: Mapped["RiskProfile | None"] = relationship(
         back_populates="user", cascade="all, delete-orphan", uselist=False
     )
+    portfolio_items: Mapped[list["PortfolioItem"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class RiskProfile(Base):
@@ -57,3 +60,27 @@ class RiskProfile(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="risk_profile")
+
+
+class PortfolioItem(Base):
+    __tablename__ = "portfolio_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    stock_symbol: Mapped[str] = mapped_column(String(6), nullable=False)
+    stock_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    average_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    shares: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship(back_populates="portfolio_items")

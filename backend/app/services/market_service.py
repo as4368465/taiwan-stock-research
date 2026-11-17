@@ -38,6 +38,16 @@ def get_stock_analysis(symbol: str) -> dict:
     }
 
 
+def get_industry_peers(symbol: str, limit: int = 3) -> list[dict[str, str]]:
+    """回傳同產業分類的有限對照樣本；由 Agent 控制行情查詢數量。"""
+    if not valid_symbol(symbol):
+        raise ValueError("股票代號格式應為 4 到 6 位數字")
+    provider, _, is_demo_data = get_provider()
+    if is_demo_data:
+        return []
+    return provider.get_industry_peers(symbol, limit)
+
+
 def get_market_overview() -> dict:
     provider, source, is_demo_data = get_provider()
     frame = provider.get_market_index()

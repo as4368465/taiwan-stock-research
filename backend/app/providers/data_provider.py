@@ -27,6 +27,9 @@ class StockDataProvider(Protocol):
     def get_stock_name(self, symbol: str) -> str | None:
         ...
 
+    def get_industry_peers(self, symbol: str, limit: int = 3) -> list[dict[str, str]]:
+        ...
+
     def get_news_for_date(self, symbol: str, news_date: date) -> list[dict]:
         ...
 
@@ -53,6 +56,10 @@ class SampleDataProvider:
 
     def get_stock_name(self, symbol: str) -> str | None:
         return "台積電（示範）" if symbol == "2330" else None
+
+    def get_industry_peers(self, symbol: str, limit: int = 3) -> list[dict[str, str]]:
+        # 示範模式沒有股票分類資料，避免拿虛構同業做比較。
+        return []
 
     def get_news_for_date(self, symbol: str, news_date: date) -> list[dict]:
         # 示範資料夾沒有新聞，因此離線模式回傳空清單。
@@ -166,11 +173,22 @@ class FinMindDataProvider:
             return _stock_info_cache
 
         records = request_finmind_data({"dataset": "TaiwanStockInfo"})
-        _stock_info_cache = [
-            {"stock_id": str(row["stock_id"]), "stock_name": str(row["stock_name"])}
-            for row in records
-            if row.get("stock_id") and row.get("stock_name")
-        ]
+        # TaiwanStockInfo 可能同一股票有不同日期的資料列；保留最新分類資料。
+        latest_by_id: dict[str, dict[str, str]] = {}
+        for row in records:
+            if not row.get("stock_id") or not row.get("stock_name"):
+                continue
+            stock_id = str(row["stock_id"])
+            current = latest_by_id.get(stock_id)
+            if current is None or str(row.get("date", "")) >= current.get("date", ""):
+                latest_by_id[stock_id] = {
+                    "stock_id": stock_id,
+                    "stock_name": str(row["stock_name"]),
+                    "industry_category": str(row.get("industry_category") or ""),
+                    "type": str(row.get("type") or ""),
+                    "date": str(row.get("date") or ""),
+                }
+        _stock_info_cache = list(latest_by_id.values())
         _stock_info_cached_at = monotonic()
         return _stock_info_cache
 
@@ -195,6 +213,23 @@ class FinMindDataProvider:
              if stock["stock_id"] == symbol),
             None,
         )
+
+    def get_industry_peers(self, symbol: str, limit: int = 3) -> list[dict[str, str]]:
+        stocks = self._get_stock_info()
+        target = next((stock for stock in stocks if stock["stock_id"] == symbol), None)
+        industry = target.get("industry_category", "") if target else ""
+        if not industry:
+            return []
+        # 只取同產業、一般股票，限制數量以免診斷觸發大量行情請求。
+        peers = [
+            stock for stock in stocks
+            if stock["stock_id"] != symbol
+            and stock.get("industry_category") == industry
+            and stock.get("type", "").casefold() in {"twse", "tpex", "上市", "上櫃", ""}
+            and re.fullmatch(r"\d{4,6}", stock["stock_id"])
+        ]
+        peers.sort(key=lambda stock: stock["stock_id"])
+        return peers[:max(0, limit)]
 
     def get_news_for_date(self, symbol: str, news_date: date) -> list[dict]:
         # FinMind 的 TaiwanStockNews 一次只能查一天，所以由 service 控制日期範圍。

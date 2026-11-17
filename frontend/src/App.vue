@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import AuthView from './views/AuthView.vue'
 import RiskAssessmentView from './views/RiskAssessmentView.vue'
+import PortfolioView from './views/PortfolioView.vue'
 import { ApiError, clearAccessToken, getAccessToken, apiRequest } from './api/http'
 import { getCurrentUser } from './api/auth'
 import type { UserResponse } from './api/auth'
@@ -63,7 +64,7 @@ const selectedStockId = ref('')
 const suggestions = ref<StockMatch[]>([])
 const showSuggestions = ref(false)
 const analysis = ref<Analysis | null>(null)
-const activeSection = ref<'market' | 'risk' | 'auth'>('market')
+const activeSection = ref<'market' | 'risk' | 'portfolio' | 'auth'>('market')
 const currentUser = ref<UserResponse | null>(null)
 const authNotice = ref('')
 const viewMode = ref<'market' | 'stock'>('market')
@@ -299,6 +300,16 @@ function openRiskAssessment() {
   activeSection.value = 'risk'
 }
 
+function openPortfolio() {
+  if (!currentUser.value) {
+    activeSection.value = 'auth'
+    authNotice.value = '請先登入，才能管理個人持股。'
+    return
+  }
+  authNotice.value = ''
+  activeSection.value = 'portfolio'
+}
+
 function onAuthenticated(user: UserResponse) {
   currentUser.value = user
   authNotice.value = ''
@@ -414,6 +425,7 @@ void loadMarket()
       <nav class="primary-nav" aria-label="主要導覽">
         <button type="button" :class="{ active: activeSection === 'market' }" @click="activeSection = 'market'">看盤分析</button>
         <button type="button" :class="{ active: activeSection === 'risk' }" @click="openRiskAssessment">風險測驗</button>
+        <button type="button" :class="{ active: activeSection === 'portfolio' }" @click="openPortfolio">庫存診斷</button>
       </nav>
       <span class="topbar-note"><span class="status-dot"></span>研究模式 · 不連接券商</span>
       <div class="account-nav">
@@ -437,6 +449,7 @@ void loadMarket()
       v-else-if="activeSection === 'risk' && currentUser"
       @profile-updated="onRiskProfileUpdated"
     />
+    <PortfolioView v-else-if="activeSection === 'portfolio' && currentUser" />
     <template v-else>
     <section class="intro">
       <div class="eyebrow">MARKET RESEARCH / 台灣市場</div>
