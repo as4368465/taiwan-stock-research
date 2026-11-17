@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 
+import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,10 @@ from app.services.market_service import (
     get_stock_analysis,
 )
 from app.services.news_service import get_stock_news
+from app.services.technical_indicators import (
+    calculate_technical_indicators,
+    technical_indicator_source,
+)
 
 DISCLAIMER = (
     "本內容僅供個人研究與教育用途，不構成投資建議或獲利保證。行情為來源提供的最近盤後日線，"
@@ -44,7 +49,7 @@ def _pct(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def _technical_sources(analysis: dict) -> tuple[list[SourceReference], dict]:
+def _technical_sources(analysis: dict):
     rows = analysis["data"]
     if not rows:
         raise ValueError("此股票目前沒有可供診斷的日線資料")
@@ -75,6 +80,13 @@ def _technical_sources(analysis: dict) -> tuple[list[SourceReference], dict]:
         )
         for title, detail in facts
     ]
+    try:
+        technical_snapshot = calculate_technical_indicators(pd.DataFrame(rows))
+    except (ValueError, TypeError, KeyError):
+        # 舊版或部分測試行情若沒有 OHLCV，保留原技術來源並標記進階特徵不足。
+        technical_snapshot = None
+    if technical_snapshot:
+        sources.append(technical_indicator_source(technical_snapshot))
     return sources, {
         "latest": {
             "close": latest["close"],
@@ -84,7 +96,7 @@ def _technical_sources(analysis: dict) -> tuple[list[SourceReference], dict]:
         },
         "five_day_return_pct": str(_pct(five_day_return)),
         "data_date": data_date,
-    }
+    }, technical_snapshot
 
 
 def _news_sources(news_response: dict) -> list[SourceReference]:
@@ -195,6 +207,7 @@ def _fallback_reasoning(
     pnl_pct: Decimal,
     action: SellAction,
     industry_context: list[dict] | None = None,
+    technical_snapshot=None,
 ) -> str:
     latest = technical["latest"]
     action_label = {
@@ -236,6 +249,14 @@ def _fallback_reasoning(
         parts.append(
             f"均線資料：收盤 {latest['close']} 元，MA5 {latest['ma5']} 元、"
             f"MA20 {latest['ma20']} 元、MA60 {latest['ma60']} 元。"
+        )
+    if technical_snapshot:
+        latest_candle = technical_snapshot.candles[-1]
+        parts.append(
+            f"進階動能指標：最新 K 棒為{latest_candle.pattern}，量比 "
+            f"{technical_snapshot.volume_ratio}x（{technical_snapshot.volume_signal}），"
+            f"RSI14 {technical_snapshot.rsi14}（{technical_snapshot.rsi_signal}），"
+            f"MACD 柱狀體 {technical_snapshot.macd_histogram}（{technical_snapshot.macd_signal}）。"
         )
     peer_summary = next(
         (row["比較摘要"] for row in industry_context or [] if "比較摘要" in row),
@@ -301,7 +322,8 @@ def _generate_with_openai(context: dict, expected_action: SellAction) -> SellDia
         "簡體中文或英文句子；MA5、MA20、MA60、TAIEX 等指標縮寫可保留。公司名稱必須照輸入原文，"
         "用詞請使用「未實現損益／報酬率」及「可承受最大虧損比例」，不可把持倉損益稱為已實現回報或最大回撤。"
         "不可自行翻譯或改名。只能使用使用者訊息中的行情、風險屬性、公司新聞與大盤 sources；"
-        "不可新增任何價格、指標、新聞事件、日期或網址。請把持倉損益、均線與個股近五日走勢，"
+        "不可新增任何價格、指標、新聞事件、日期或網址。請結合 K 棒型態、量比、RSI14、MACD、"
+        "持倉損益、均線與個股近五日走勢，"
         "公司近期新聞內容與同產業對照股的相對表現整合成一段判斷，再用大盤作背景；不要把資料逐項貼上。"
         "若同業多數強於個股，只能說觀察到相對弱勢，不能直接宣稱資金輪動；若新聞與下跌同時出現，"
         "不能直接說新聞造成信心降低，除非來源本身有明確證據。缺少同業資料時需明說。"
@@ -309,7 +331,7 @@ def _generate_with_openai(context: dict, expected_action: SellAction) -> SellDia
         "action 必須原樣回傳 expected_action。reasoning 僅可解釋輸入資料，不可保證獲利。"
         "source_ids 必須只填入輸入 sources 中已存在的 source_id，不可自行建立或改寫編號。"
         "有公司新聞、大盤或同業來源時，reasoning 應引用並連結其含義；source_ids 至少要包括可用的一筆新聞、"
-        "一筆同業來源（若存在）與一筆技術來源。"
+        "一筆同業來源（若存在）、一筆一般技術來源與進階指標來源（若存在）。"
     )
     client = OpenAI(api_key=settings.openai_api_key.get_secret_value())
     # 使用 OpenAI SDK 的 HTTP client 傳送官方 Structured Outputs JSON Schema，
@@ -373,7 +395,7 @@ async def diagnose_sell(
     except (RuntimeError, ValueError, KeyError, TypeError):
         peer_results = []
 
-    technical_sources, technical = _technical_sources(analysis)
+    technical_sources, technical, technical_snapshot = _technical_sources(analysis)
     news_sources = _news_sources(news_response)
     market_source = _market_source(market)
     target_return = Decimal(str(technical["five_day_return_pct"]))
@@ -402,6 +424,10 @@ async def diagnose_sell(
             "可承受最大虧損比例（百分比）": str(profile.max_drawdown_pct) if profile else "10.00",
         },
         "技術面": technical,
+        "K棒量價與動能指標": (
+            technical_snapshot.model_dump(mode="json")
+            if technical_snapshot else "OHLCV 資料不足，禁止推測 K 棒、RSI 或 MACD。"
+        ),
         "公司事件與新聞線索": [
             {"標題": source.title, "摘要": source.detail, "發布時間": source.published_at.isoformat()}
             for source in news_sources
@@ -451,12 +477,24 @@ async def diagnose_sell(
         source.source_type is SourceType.NEWS for source in selected_sources
     )) or bool(market_source and market_source not in selected_sources) or bool(
         peer_sources and not any(source.source_type is SourceType.INDUSTRY for source in selected_sources)
+    ) or bool(
+        technical_snapshot and not any(
+            source.title.startswith("K 棒、量比、RSI14") for source in selected_sources
+        )
     )
     invalid_language = JAPANESE_KANA.search(draft.reasoning) is not None
     inaccurate_terminology = any(term in draft.reasoning for term in INACCURATE_POSITION_TERMS)
     if invalid_language or inaccurate_terminology or invalid_source_id or missing_required_citation:
         reasoning = _fallback_reasoning(
-            item, technical, news_sources, market_source, risk_label, pnl_pct, action, industry_context
+            item,
+            technical,
+            news_sources,
+            market_source,
+            risk_label,
+            pnl_pct,
+            action,
+            industry_context,
+            technical_snapshot,
         )
         confidence = ConfidenceLevel.LOW
     else:
@@ -470,5 +508,7 @@ async def diagnose_sell(
         confidence_level=confidence,
         reasoning=reasoning,
         sources=grounded_sources,
+        technical_snapshot=technical_snapshot,
+        audit_approved=not invalid_source_id and not missing_required_citation,
         disclaimer=DISCLAIMER,
     )

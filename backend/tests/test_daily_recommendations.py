@@ -45,7 +45,11 @@ def mock_analysis(symbol: str, close: float = 100) -> dict:
         value = close * (0.8 + day / 400)
         rows.append({
             "date": (datetime(2026, 8, 1) + timedelta(days=day - 1)).date().isoformat(),
+            "open": value * 0.99,
+            "high": value * 1.01,
+            "low": value * 0.98,
             "close": value,
+            "volume": 100000 + day * 100,
             "ma5": value * 0.99,
             "ma20": value * 0.98,
             "ma60": value * 0.95,
@@ -93,6 +97,7 @@ def test_daily_recommendation_api_returns_grounded_three_and_calculated_prices(
             data_date="2026-11-16",
             data_source="Mock 行情來源",
             is_demo_data=False,
+            technical_snapshot=None,
         )
         for index in range(5)
     ]

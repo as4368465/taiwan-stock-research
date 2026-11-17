@@ -1,5 +1,5 @@
 import { apiRequest, postJson } from './http'
-import type { SourceReference } from './advisory'
+import type { SourceReference, TechnicalIndicatorSnapshot } from './advisory'
 
 export type DailyRecommendationRequest = {
   investment_budget: number
@@ -18,6 +18,7 @@ export type StockRecommendation = {
   stop_loss_price: number | string
   reasoning: string
   sources: SourceReference[]
+  technical_snapshot: TechnicalIndicatorSnapshot | null
 }
 
 export type DailyRecommendationResponse = {
@@ -25,6 +26,8 @@ export type DailyRecommendationResponse = {
   user_risk_type: string
   market_summary: string
   recommendations: StockRecommendation[]
+  audit_approved: boolean
+  audit_note: string | null
   disclaimer: string
 }
 

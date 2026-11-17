@@ -178,8 +178,17 @@ onMounted(loadPortfolio)
       <section v-if="diagnoses[item.id]" class="diagnosis-card">
         <div class="diagnosis-result-heading">
           <span class="diagnosis-action" :class="diagnoses[item.id].action.toLowerCase()">{{ actionLabel(diagnoses[item.id].action) }}</span>
+          <span class="audit-badge" :class="diagnoses[item.id].audit_approved ? 'approved' : 'review-needed'">
+            {{ diagnoses[item.id].audit_approved ? '✓ 通過來源與風險規則檢查' : '需人工覆核來源' }}
+          </span>
           <span>參考賣出區間：{{ formatMoney(diagnoses[item.id].suggested_sell_price_min) }}–{{ formatMoney(diagnoses[item.id].suggested_sell_price_max) }} 元</span>
           <small>信心程度：{{ confidenceLabel(diagnoses[item.id].confidence_level) }}</small>
+        </div>
+        <div v-if="diagnoses[item.id].technical_snapshot" class="technical-highlight-strip">
+          <span class="technical-pattern">{{ diagnoses[item.id]?.technical_snapshot?.candles.at(-1)?.pattern }}</span>
+          <span>RSI14 <strong>{{ diagnoses[item.id]?.technical_snapshot?.rsi14 ?? '—' }}</strong> {{ diagnoses[item.id]?.technical_snapshot?.rsi_signal }}</span>
+          <span>量比 <strong>{{ diagnoses[item.id]?.technical_snapshot?.volume_ratio ?? '—' }}x</strong> {{ diagnoses[item.id]?.technical_snapshot?.volume_signal }}</span>
+          <span>MACD <strong>{{ diagnoses[item.id]?.technical_snapshot?.macd_signal }}</strong></span>
         </div>
         <p class="diagnosis-reasoning">{{ diagnoses[item.id].reasoning }}</p>
         <div class="diagnosis-sources">

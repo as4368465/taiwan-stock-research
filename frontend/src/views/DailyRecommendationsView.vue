@@ -102,8 +102,14 @@ onMounted(loadProfileDefaults)
     <section v-if="result" class="recommendation-results">
       <div class="recommendation-result-heading">
         <div><div class="eyebrow">TOP 3 / 來源佐證</div><h2>為你整理的三檔觀察標的</h2></div>
-        <span>{{ result.user_risk_type }} · {{ new Date(result.generated_at).toLocaleString('zh-TW') }}</span>
+        <div class="recommendation-audit-status">
+          <span class="audit-badge" :class="result.audit_approved ? 'approved' : 'review-needed'">
+            {{ result.audit_approved ? '✓ 通過 AI 風控合規審查' : '需人工覆核' }}
+          </span>
+          <small>{{ result.user_risk_type }} · {{ new Date(result.generated_at).toLocaleString('zh-TW') }}</small>
+        </div>
       </div>
+      <p v-if="result.audit_note" class="recommendation-audit-note">{{ result.audit_note }}</p>
       <p class="recommendation-market-summary">{{ result.market_summary }}</p>
 
       <article v-for="(stock, index) in result.recommendations" :key="stock.symbol" class="recommendation-card">
@@ -124,6 +130,12 @@ onMounted(loadProfileDefaults)
           <div class="price-track-current"><span>最近收盤</span><strong>{{ money(stock.current_price) }}</strong></div>
           <div class="price-track-line"><span></span></div>
           <div><span>目標停利參考</span><strong>{{ money(stock.target_sell_price) }}</strong></div>
+        </div>
+        <div v-if="stock.technical_snapshot" class="technical-highlight-strip">
+          <span class="technical-pattern">{{ stock.technical_snapshot.candles.at(-1)?.pattern }}</span>
+          <span>RSI14 <strong>{{ stock.technical_snapshot.rsi14 ?? '—' }}</strong> {{ stock.technical_snapshot.rsi_signal }}</span>
+          <span>量比 <strong>{{ stock.technical_snapshot.volume_ratio ?? '—' }}x</strong> {{ stock.technical_snapshot.volume_signal }}</span>
+          <span>MACD <strong>{{ stock.technical_snapshot.macd_signal }}</strong></span>
         </div>
         <p class="recommendation-reasoning">{{ stock.reasoning }}</p>
         <details class="recommendation-sources">
@@ -157,6 +169,12 @@ onMounted(loadProfileDefaults)
 .recommendation-results { margin-top: 36px; }
 .recommendation-result-heading h2 { margin: 6px 0; }
 .recommendation-result-heading > span { color: #778196; font-size: 13px; }
+.recommendation-audit-status { display: grid; justify-items: end; gap: 6px; }
+.recommendation-audit-status small { color: #778196; font-size: 12px; }
+.audit-badge { padding: 7px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.audit-badge.approved { color: #267044; background: #eaf8f0; }
+.audit-badge.review-needed { color: #9a5a25; background: #fff4e8; }
+.recommendation-audit-note { margin: 8px 0 14px; color: #687386; font-size: 13px; line-height: 1.7; }
 .recommendation-market-summary, .recommendation-success { padding: 14px 16px; border-radius: 12px; background: #eef5ff; color: #36527e; line-height: 1.7; }
 .recommendation-success { background: #eaf8f0; color: #267044; }
 .recommendation-card { margin-top: 16px; }
@@ -172,6 +190,9 @@ onMounted(loadProfileDefaults)
 .price-track-line { height: 3px; background: linear-gradient(90deg, #e65e67, #d9dee8, #27a978); }
 .price-track-current { text-align: center; }
 .recommendation-reasoning { line-height: 1.9; color: #37445a; }
+.technical-highlight-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 15px 0; padding: 12px 14px; border: 1px solid #e7ecf5; border-radius: 11px; color: #637088; background: #f8faff; font-size: 12px; }
+.technical-highlight-strip strong { color: #37445a; }
+.technical-pattern { padding: 5px 8px; border-radius: 999px; color: #31589f; background: #eaf1ff; font-weight: 700; }
 .recommendation-sources { padding-top: 12px; border-top: 1px solid #edf0f5; }
 .recommendation-sources summary { cursor: pointer; font-weight: 700; }
 .recommendation-sources article { margin-top: 14px; padding: 14px; border-radius: 10px; background: #f7f8fb; }
@@ -181,5 +202,5 @@ onMounted(loadProfileDefaults)
 .recommendation-sources p { margin: 9px 0 0; color: #596579; line-height: 1.7; }
 .risk-disclaimer { color: #768094; font-size: 13px; line-height: 1.7; }
 @media (max-width: 820px) { .recommendation-form-grid { grid-template-columns: 1fr 1fr; } .recommendation-form-grid button { grid-column: 1 / -1; } }
-@media (max-width: 600px) { .recommendation-page { width: min(100% - 24px, 1120px); } .recommendation-conditions, .recommendation-card { padding: 18px; } .recommendation-risk-row, .recommendation-result-heading, .recommendation-card-top { align-items: flex-start; flex-direction: column; } .recommendation-form-grid, .recommendation-metrics { grid-template-columns: 1fr; } .recommendation-form-grid button { grid-column: auto; } .recommendation-price-track { grid-template-columns: 1fr; text-align: left; } .price-track-line { width: 100%; } .recommendation-price-track .price-track-current { text-align: left; } }
+@media (max-width: 600px) { .recommendation-page { width: min(100% - 24px, 1120px); } .recommendation-conditions, .recommendation-card { padding: 18px; } .recommendation-risk-row, .recommendation-result-heading, .recommendation-card-top { align-items: flex-start; flex-direction: column; } .recommendation-audit-status { justify-items: start; }.recommendation-form-grid, .recommendation-metrics { grid-template-columns: 1fr; } .recommendation-form-grid button { grid-column: auto; } .recommendation-price-track { grid-template-columns: 1fr; text-align: left; } .price-track-line { width: 100%; } .recommendation-price-track .price-track-current { text-align: left; } }
 </style>

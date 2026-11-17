@@ -6,6 +6,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.advisory import SourceReference
+from app.schemas.technical import TechnicalIndicatorSnapshot
 
 
 class DailyRecommendationRequest(BaseModel):
@@ -29,6 +30,7 @@ class StockRecommendationItem(BaseModel):
     stop_loss_price: Decimal = Field(gt=0, max_digits=12, decimal_places=4)
     reasoning: str = Field(min_length=20, max_length=3000)
     sources: list[SourceReference] = Field(min_length=1, max_length=10)
+    technical_snapshot: TechnicalIndicatorSnapshot | None = None
 
 
 class DailyRecommendationResponse(BaseModel):
@@ -38,6 +40,8 @@ class DailyRecommendationResponse(BaseModel):
     user_risk_type: str = Field(min_length=1, max_length=40)
     market_summary: str = Field(min_length=1, max_length=1000)
     recommendations: list[StockRecommendationItem] = Field(min_length=3, max_length=3)
+    audit_approved: bool = False
+    audit_note: str | None = None
     disclaimer: str
 
 
@@ -57,6 +61,7 @@ class ScreenerCandidate(BaseModel):
     data_date: str
     data_source: str
     is_demo_data: bool
+    technical_snapshot: TechnicalIndicatorSnapshot | None = None
 
 
 class RecommendationChoice(BaseModel):
@@ -71,3 +76,11 @@ class DailyRecommendationDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     selections: list[RecommendationChoice] = Field(min_length=3, max_length=3)
+
+
+class RecommendationAuditResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approved: bool
+    feedback: str = Field(default="", max_length=1500)
+    note: str = Field(default="", max_length=500)

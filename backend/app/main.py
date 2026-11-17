@@ -7,7 +7,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.api.v1 import advisory, auth, health, market, news, portfolio, risk, stocks
+from app.api.v1 import (
+    advisory,
+    auth,
+    glossary,
+    health,
+    market,
+    news,
+    portfolio,
+    risk,
+    stocks,
+)
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal, create_tables, engine
 
@@ -49,6 +59,7 @@ def create_app(
     api.include_router(risk.router, prefix="/api/v1")
     api.include_router(portfolio.router, prefix="/api/v1")
     api.include_router(advisory.router, prefix="/api/v1")
+    api.include_router(glossary.router, prefix="/api/v1")
     return api
 
 

@@ -10,6 +10,32 @@ export type SourceReference = {
   published_at: string | null
 }
 
+export type CandleFeature = {
+  date: string
+  open: number | string
+  high: number | string
+  low: number | string
+  close: number | string
+  body_ratio_pct: number | string
+  upper_shadow_ratio_pct: number | string
+  lower_shadow_ratio_pct: number | string
+  candle_color: string
+  pattern: string
+}
+
+export type TechnicalIndicatorSnapshot = {
+  latest_date: string
+  candles: CandleFeature[]
+  volume_ratio: number | string | null
+  volume_signal: string
+  rsi14: number | string | null
+  rsi_signal: string
+  macd_dif: number | string | null
+  macd_dea: number | string | null
+  macd_histogram: number | string | null
+  macd_signal: string
+}
+
 export type SellDiagnosis = {
   action: SellAction
   suggested_sell_price_min: number
@@ -17,6 +43,8 @@ export type SellDiagnosis = {
   confidence_level: ConfidenceLevel
   reasoning: string
   sources: SourceReference[]
+  technical_snapshot: TechnicalIndicatorSnapshot | null
+  audit_approved: boolean
   disclaimer: string
 }
 

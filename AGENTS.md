@@ -58,3 +58,22 @@ project-root/
 1. **機密保護**：嚴禁讀取、印出或提交 `.env` 檔案內容；所有金鑰（`OPENAI_API_KEY`, `SECRET_KEY`, `DATABASE_URL`）一律透過 `pydantic-settings` 載入。
 2. **架構保護**：重構目錄時，必須保留既有 `data_provider` 與 `news_service` 的核心抓取邏輯並平滑遷移至 `backend/app/providers/`，不可破壞現有前端 K 線與均線圖表的 API 格式。
 3. **高風險指令禁止**：禁止執行 `rm -rf`、強制覆蓋 Git 歷史（`git push -f`）或未經確認刪除資料庫檔案。
+
+---
+
+## 4. 擴充功能與進階量化特徵規範（階段五擴充）
+
+### A. 進階技術指標與 K 棒型態特徵（Feature Engineering）
+1. **確定性指標計算（`backend/app/services/technical_indicators.py`）**：
+   - 嚴禁讓 LLM 自行計算技術指標或 K 棒比例，必須由 Python 確定性函式先計算出精準數值與結構化標籤後再傳入 Agent：
+     * **K 棒型態特徵**：開盤/最高/最低/收盤（OHLC）結構、實體紅黑K比例、上下影線長度比例（辨識如「長下影線支撐」、「帶量長紅突破」、「高檔長上影線」等型態）。
+     * **量價關係**：當日成交量相較 5 日均量（5MA Volume）的量增/量縮倍數。
+     * **動能指標**：14 日 RSI（相對強弱指標，標註超買 >70 / 超賣 <30）與 MACD 柱狀體多空方向。
+2. **AI 診斷與選股上下文升級**：
+   - `sell_advisor_agent.py` 與 `daily_recommender_agent.py` 必須同時整合「均線（MA5/20/60）+ K棒型態 + 量價動能（RSI/MACD）+ 最新新聞」進行綜合判斷，並將關鍵技術指標數值列入 `sources` 佐證清單。
+
+### B. 金融專業術語知識庫模組（Glossary Service）
+1. **結構化術語庫（`backend/app/services/glossary_service.py`）**：
+   - 建立常見台股與量化交易術語資料庫（如：K線/K棒、做多/做空、均線黃金交叉/死亡交叉、乖離率、量價背離、RSI、MACD、停損/停利、除權息、本益比等），包含：術語名稱、分類、一句話白話解釋、實戰判讀重點與風險提示。
+2. **API 與前端互動**：
+   - 提供 `GET /api/v1/glossary`（支援關鍵字搜尋與分類篩選）與前端「投資術語小百科」抽屜/頁面，方便新手隨時查詢。

@@ -5,6 +5,7 @@ import AuthView from './views/AuthView.vue'
 import RiskAssessmentView from './views/RiskAssessmentView.vue'
 import PortfolioView from './views/PortfolioView.vue'
 import DailyRecommendationsView from './views/DailyRecommendationsView.vue'
+import GlossaryDrawer from './views/GlossaryDrawer.vue'
 import { ApiError, clearAccessToken, getAccessToken, apiRequest } from './api/http'
 import { getCurrentUser } from './api/auth'
 import type { UserResponse } from './api/auth'
@@ -68,6 +69,7 @@ const analysis = ref<Analysis | null>(null)
 const activeSection = ref<'market' | 'risk' | 'portfolio' | 'daily' | 'auth'>('market')
 const currentUser = ref<UserResponse | null>(null)
 const authNotice = ref('')
+const glossaryOpen = ref(false)
 const viewMode = ref<'market' | 'stock'>('market')
 const market = ref<MarketOverview | null>(null)
 const marketLoading = ref(false)
@@ -431,13 +433,14 @@ void loadMarket()
     <header class="topbar">
       <a class="brand" href="#" aria-label="返回大盤總覽" @click.prevent="goHome">
         <span class="brand-mark">Q</span>
-        <span>quant<span class="brand-light">lab</span><small>TAIWAN EQUITY RESEARCH</small></span>
+        <span>QuantGuard <span class="brand-light">TW</span><small>個人化台股 Multi-Agent 量化分析師團隊</small></span>
       </a>
       <nav class="primary-nav" aria-label="主要導覽">
         <button type="button" :class="{ active: activeSection === 'market' }" @click="activeSection = 'market'">看盤分析</button>
         <button type="button" :class="{ active: activeSection === 'risk' }" @click="openRiskAssessment">風險測驗</button>
         <button type="button" :class="{ active: activeSection === 'portfolio' }" @click="openPortfolio">庫存診斷</button>
         <button type="button" :class="{ active: activeSection === 'daily' }" @click="openDailyRecommendations">每日推薦</button>
+        <button type="button" :class="{ active: glossaryOpen }" @click="glossaryOpen = true">術語百科</button>
       </nav>
       <span class="topbar-note"><span class="status-dot"></span>研究模式 · 不連接券商</span>
       <div class="account-nav">
@@ -469,8 +472,8 @@ void loadMarket()
     <template v-else>
     <section class="intro">
       <div class="eyebrow">MARKET RESEARCH / 台灣市場</div>
-      <h1>詩瑾的<span>台股發財夢。</span></h1>
-      <p>股票小白也能選出最適合自己的一套股票清單。</p>
+      <h1>QuantGuard <span>TW</span></h1>
+      <p>你的個人化台股 Multi-Agent 量化分析師團隊</p>
     </section>
 
     <section class="search-card" aria-label="股票查詢">
@@ -562,7 +565,8 @@ void loadMarket()
       <div class="notice"><span class="notice-icon">i</span><span>{{ analysis.notice }}資料來源：{{ analysis.data_source }}。來源資料可能延遲或更正，請自行核對。</span></div>
     </template>
 
-    <footer>QUANTLAB · 個人研究專案 <span>資料為示範用途</span></footer>
+    <footer>QuantGuard TW · 個人化台股量化研究 <span>資料為研究用途</span></footer>
     </template>
+    <GlossaryDrawer :open="glossaryOpen" @close="glossaryOpen = false" />
   </main>
 </template>

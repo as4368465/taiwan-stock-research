@@ -9,6 +9,7 @@ import pandas as pd
 from app.core.enums import RiskType
 from app.schemas.recommendation import ScreenerCandidate
 from app.services.market_service import get_stock_analysis
+from app.services.technical_indicators import calculate_technical_indicators
 
 CORE_WATCHLIST = (
     ("2330", "台積電"), ("2317", "鴻海"), ("2454", "聯發科"),
@@ -72,6 +73,7 @@ def _candidate(
         CENT, rounding=ROUND_HALF_UP
     )
     ma5, ma20, ma60 = (Decimal(str(latest[key])) for key in ("ma5", "ma20", "ma60"))
+    technical_snapshot = calculate_technical_indicators(pd.DataFrame(rows))
     source = analysis.get("data_source", "行情 Provider")
     demo = analysis.get("is_demo_data", False)
     return ScreenerCandidate(
@@ -86,6 +88,7 @@ def _candidate(
         data_date=str(latest["date"]),
         data_source=str(source),
         is_demo_data=bool(demo),
+        technical_snapshot=technical_snapshot,
     )
 
 

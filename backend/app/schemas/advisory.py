@@ -6,6 +6,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.technical import TechnicalIndicatorSnapshot
+
 
 class SellAction(StrEnum):
     TAKE_PROFIT = "TAKE_PROFIT"
@@ -56,4 +58,6 @@ class SellDiagnosisResponse(BaseModel):
     confidence_level: ConfidenceLevel
     reasoning: str = Field(min_length=1, max_length=4000)
     sources: list[SourceReference]
+    technical_snapshot: TechnicalIndicatorSnapshot | None = None
+    audit_approved: bool = False
     disclaimer: str

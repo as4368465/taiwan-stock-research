@@ -1,99 +1,116 @@
-# 台股量化研究平台（學習版）
+# 📈 台股量化分析與 Multi-Agent AI 投顧系統 (TW-Stock Quantitative & Agentic Advisory System)
 
-這是逐步學習用的研究工具，不會連接券商，也不會自動下單。首頁顯示最近交易日加權指數；個股頁透過 FinMind REST API 取得歷史日線，並由 Pandas 計算均線。資料更新可能延遲，也不代表任何投資建議。
+一個結合**確定性量化特徵工程（Deterministic Feature Engineering）**、**LangGraph 多代理人狀態機編排（Multi-Agent Reflection Loop）**與**來源溯源防幻覺機制（Citation Grounding）**的企業級台股投資輔助系統。
 
-## 技術組合
+---
 
-- 前端：Vue 3、TypeScript、Vite、ECharts
-- 後端：Python 3.11+、FastAPI、Pandas、Pydantic v2
-- 資料庫基礎：SQLAlchemy Async、SQLite / aiosqlite
-- 資料介接：一般 HTTP/REST API，不需 FinMind SDK
-- 來源：FinMind TaiwanStockPrice 歷史日成交資料
+## 🎯 專案解決的核心痛點
 
-## 資料夾
+傳統 LLM 應用在金融領域常面臨三大致命缺陷：**數學計算不精準、憑空捏造新聞與數據（幻覺）、以及缺乏個人化風控邊界**。本系統透過以下架構設計徹底解決這些問題：
 
-```text
-taiwan-stock-research/
-├─ .env.example            # 環境變數範例，不含金鑰
-├─ backend/
-│  ├─ app/main.py          # FastAPI 進入點與 router 組裝
-│  ├─ app/core/            # Settings 與密碼/JWT 工具
-│  ├─ app/db/              # Async SQLAlchemy engine、session 與 ORM 基底
-│  ├─ app/schemas/         # API 的 Pydantic v2 資料契約
-│  ├─ app/api/v1/          # health、market、stocks、news 路由
-│  ├─ app/services/        # 市場分析與新聞服務協調
-│  ├─ app/agents/          # AI Agent 擴充位置（目前未啟用）
-│  ├─ app/providers/       # FinMind / 示範資料與新聞快取邏輯
-│  ├─ data/2330.csv        # 離線示範資料
-│  ├─ tests/               # API 相容性測試
-│  └─ requirements.txt     # Python 套件
-├─ frontend/src/App.vue    # 查詢頁與價格／均線圖
-├─ frontend/src/style.css  # 頁面樣式
+1. **確定性量化與機率性推理分離（Hybrid Architecture）：**
+   - 均線（MA5/20/60）、K 棒型態（實體比例、上下影線）、量比倍數、14 日 RSI 與 MACD 均由純 Python 確定性演算法計算，絕不交由 LLM 自行推算。
+   - LLM 專注於語意理解財經新聞、整合多維度技術指標，並根據用戶風險畫像進行邏輯推理。
+2. **LangGraph 雙代理人自我修正迴圈（Reflection Pattern）：**
+   - 導入 `Analyst Agent（選股分析師）` 與 `Risk Auditor Agent（風控合規審查員）` 狀態機。若推薦標的違反用戶停損上限或在 RSI 超買區追高，系統會自動附上審查意見退回重算。
+3. **強制結構化輸出與來源溯源（Pydantic v2 + Citation Grounding）：**
+   - 所有 AI 決策均透過 OpenAI Structured Outputs 鎖定 Pydantic v2 Schema，強制輸出 `SourceReference`（可點擊查證的新聞 URL 與真實技術指標數值），確保每筆買賣建議有據可查。
+
+---
+
+## 🏗️ 系統整體架構圖
+
+```mermaid
+graph TD
+    subgraph Frontend [Vue 3 + ECharts 前端介面]
+        UI_Chart[個股 K 線與均線看盤]
+        UI_Risk[投資風險屬性問卷]
+        UI_Port[持股庫存與 AI 賣出診斷]
+        UI_Rec[每日 AI 選股推薦]
+        UI_Gloss[投資術語小百科]
+    end
+
+    subgraph Backend [FastAPI 非同步後端服務]
+        API[RESTful API v1 + JWT 認證]
+        Quant[確定性量化服務<br/>Screener / K棒型態 / RSI / MACD]
+        DB[(SQLite / SQLAlchemy Async<br/>Users / RiskProfiles / Portfolios)]
+        
+        subgraph AgentLayer [AI Agent 推理與編排層]
+            SellAgent[賣出時機診斷 Agent<br/>Structured Outputs]
+            subgraph LangGraph [LangGraph 每日選股狀態機]
+                Analyst[選股分析師節點]
+                Auditor[風控合規審查節點]
+                Analyst -->|產出推薦草案| Auditor
+                Auditor -->|合規不通過: 附修改建議重算| Analyst
+            end
+        end
+    end
+
+    subgraph DataSources [外部數據與模型]
+        MarketAPI[台股行情 Provider]
+        NewsAPI[個股新聞服務]
+        OpenAI[OpenAI API / gpt-4o-mini]
+    end
+
+    Frontend <-->|JSON / Pydantic v2| API
+    API <--> DB
+    API --> Quant
+    API --> AgentLayer
+    Quant <--> MarketAPI
+    AgentLayer <--> NewsAPI
+    AgentLayer <--> OpenAI
 ```
 
-## 啟動方式（Windows PowerShell）
+---
 
-先在專案根目錄複製環境範例檔並建立根目錄虛擬環境，再啟動後端：
+## ✨ 核心功能模組
 
-```powershell
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-if (-not (Test-Path .venv)) { python -m venv .venv }
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r backend\requirements.txt
-python -m uvicorn app.main:app --app-dir backend --reload
+* **🔐 用戶認證與風險畫像（Auth & Risk Profiling）：** 採用 JWT 與 Bcrypt 雜湊認證；透過 5 題量化金融問卷動態評估用戶為「保守型 / 穩健型 / 積極型」，並綁定個人化目標報酬率與最大可承受虧損（Max Drawdown）。
+* **📊 庫存診斷與賣出策略 Agent（Sell Advisor Agent）：** 結合用戶買進成本、即時損益、K 棒型態（如長上影線遇壓、帶量長紅）、RSI/MACD 動能與最新個股新聞，給出分批停利、續抱波段或停損建議，並附上可驗證來源。
+* **🤖 每日買進清單 Multi-Agent（LangGraph Recommender）：** 先由量化初篩器過濾資金預算與均線強弱，再由「分析師 + 風控審查員」狀態機精選 3 檔最適合該用戶的標的，提供進場區間、建議股數試算與停損停利價位。
+* **📚 金融專業術語知識庫（Glossary Service）：** 內建台股與技術分析術語庫，支援分類檢索與白話實戰解析，降低新手判讀門檻。
+
+---
+
+## 🛠️ 技術棧與工程規範 (Tech Stack & Engineering Standards)
+
+* **後端框架：** Python 3.11+、FastAPI、SQLAlchemy (Async)、Pydantic v2
+* **AI 編排與模型：** OpenAI SDK (`Structured Outputs`)、LangGraph (`StateGraph`)
+* **數據處理：** Pandas、NumPy
+* **前端框架：** Vue 3 (Composition API)、ECharts
+* **品質把關與測試：** Ruff（靜態程式碼檢查）、Pytest（全模組自動化單元測試與 Mock 外部 API 隔離）
+* **AI 輔助開發規範：** 專案根目錄維護 `AGENTS.md`，落實 Spec-Driven Development（規格驅動開發）與自動化驗證迴圈。
+
+---
+
+## 🚀 本地啟動指南 (Quick Start)
+
+### 1. 環境變數設定
+複製專案根目錄的範本檔案並填入你的 OpenAI API 金鑰：
+```bash
+cp .env.example .env
+# 編輯 .env 填入 OPENAI_API_KEY=sk-proj-xxxx
 ```
 
-後端預設使用 FinMind；健康檢查位址為 `http://127.0.0.1:8000/api/health`，API 文件為 `http://127.0.0.1:8000/docs`。`.env.example` 不含正式金鑰；不要提交 `.env`，部署前請更換 JWT secret。
+### 2. 啟動後端服務 (FastAPI)
+```bash
+python -m venv .venv
+# Windows 啟動虛擬環境：.venv\Scripts\activate
+# macOS/Linux 啟動虛擬環境：source .venv/bin/activate
 
-若想離線看示範資料，在啟動 Uvicorn 前執行 `$env:DATA_PROVIDER="sample"`。要恢復線上歷史資料，執行 `$env:DATA_PROVIDER="finmind"`。這個環境變數只對目前 PowerShell 視窗有效。
+pip install -r backend/requirements.txt
+uvicorn app.main:app --app-dir backend --reload
+```
 
-在第二個 PowerShell 視窗切換到 `frontend` 後啟動前端：
-
-```powershell
-cd "C:\Users\m5563\Documents\Codex\2026-11-13\referenced-chatgpt-conversation-this-is-an\taiwan-stock-research\frontend"
+### 3. 啟動前端服務 (Vue 3)
+```bash
+cd frontend
 npm install
 npm run dev
 ```
 
-Vite 會顯示本機網址，通常是 `http://localhost:5173`。若 PowerShell 找不到 `npm`，重新開啟終端機，並確認 Node.js 安裝目錄已加入 PATH。
-
-## 資料來源與使用提醒
-
-- 後端每次查詢會向 FinMind 要取近一年的日線，再由本專案統一轉成日期、開高低收與成交量欄位。MA5/MA20/MA60 由本專案確定性計算。
-- 免費方案有每小時請求上限；本專案只在使用者送出查詢時呼叫一次，不會自動輪詢。資料更新時間由來源決定，請看頁面上的資料日期。
-- 資料來自 FinMind 的 `TaiwanStockPrice`。FinMind 說明個股資料可用股票代號查詢，並要求對外使用時標示來源；不得把原始資料再散布、轉售或做成鏡像服務。若要公開部署或把資料呈現在作品集網站，先確認當時適用的 FinMind 與交易所授權條款。個人本機學習與開發不等於已取得公開再散布授權。
-- FinMind 免費方案限非商業用途。此資料不能稱作即時行情；本專案刻意不做盤中自動更新。
-- 程式只在查詢輸入 4 到 6 位數字，避免把使用者輸入當成檔案路徑。若查詢遭拒或資料來源暫時無法連線，頁面會顯示錯誤訊息。
-- 切換資料來源的介面位於 `backend/app/providers/data_provider.py`，前端不需要知道供應商的欄位名稱。
-
-參考： [FinMind TaiwanStockPrice API 文件](https://finmind.github.io/v3/tutor/TaiwanMarket/Technical/)、[FinMind 方案與授權](https://finmind.github.io/Pricing/)、[FinMind 資料授權說明](https://finmind.github.io/Disclaimer/)、[證交所使用條款](https://www.twse.com.tw/zh/terms/use.html)。條款可能更新，公開使用前請重新確認。
-
-## API
-
-- `GET /api/health`：確認後端服務啟動。
-- `GET /api/market/taiex`：取得最近交易日的加權指數盤中走勢。
-- `GET /api/stocks/search?q=台積電`：依代號或名稱搜尋，最多回傳 12 個選項。股票清單在後端快取 24 小時，輸入每個字不會都重新向 FinMind 下載清單。
-- `GET /api/stocks/2330/news`：取得最多 10 則近一年新聞；下一頁帶入回應的 `next_cursor`。新聞暫存於本機 SQLite，使用股票代號與文章網址去重。
-- `GET /api/stocks/{symbol}/analysis`：取得一檔股票的近一年日線，回傳收盤價、MA5/MA20/MA60、來源、資料日期及非即時標記。
-
-新聞資料第一版使用 FinMind 提供的標題、原文連結、來源及描述欄位。SQLite 使用 Python 內建的 `sqlite3`，資料檔在 `backend/data/news.sqlite3`（已排除 Git 追蹤）；舊於 365 天的新聞會刪除。FinMind 新聞資料集一次只查一天，為控制等待時間，每個 API 呼叫最多往前補查 30 天；若資料較少，該頁可能少於 10 則，仍可用游標繼續載入。這版不下載原新聞網頁全文。
-
-路由程式放在 `backend/app/api/v1/`，商業邏輯放在 `services/`，供應商與既有新聞快取放在 `providers/`。`backend/app/db/session.py` 提供 Async SQLAlchemy engine/session 與 ORM 基底，供後續資料表功能使用；新聞快取仍沿用既有 SQLite 表與檔案，本次重構不改變它的資料格式。
-
-## 後端檢查
-
-在專案根目錄啟用 `.venv` 後執行：
-
-```powershell
-ruff check --fix backend/
+### 4. 執行自動化測試與程式碼檢查
+```bash
+ruff check backend/
 pytest backend/tests/
 ```
-
-## 建議學習順序
-
-1. 確認後端健康檢查可用。
-2. 前端輸入 `2330`，確認有資料日期與「歷史日線」標記。
-3. 查詢不存在的代號，觀察 API 如何回報錯誤。
-4. 看懂資料來源介面後，再加入上櫃資料替代來源或本地快取。
-
-第一次跑通後，可用 Git 建立檢查點；不要把 `.env` 或任何 API 金鑰提交到 Git。
